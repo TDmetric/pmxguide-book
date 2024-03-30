@@ -1,0 +1,582 @@
+---
+title: "Multistate Models"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+bibliography: references.bib
+---
+
+# Multistate Models
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+library(tidyverse)
+library(DiagrammeR)
+library(mrgsolve)
+```
+
+## Overview
+
+Multistate models, also known as multi-state survival models or transition models, are a class of statistical models used to analyze data involving transitions or changes between different states over time. These models are particularly useful for studying processes where individuals or entities can move between various states, possibly multiple times, and where the timing of these transitions is of interest. Here are several papers that beautifully demonstrate how to fit multistate models with NONMEM (check the supplementary material for example datasets and NONMEM code). [@krishnan2023][@krishnan2021][@liu]
+
+#### Arbitrary Observation Times
+
+Longitudinal data from monitoring disease progression are often incomplete in some way. Usually, patients are seen at intermittent follow-up visits, at which monitoring information is collected, but information from the periods between visits is not available. Often the exact time of disease onset is unknown. Thus, the changes of state in a multi-state model usually occur at unknown times. Also a subject may only be followed up for a portion of their disease history. A fixed observation schedule may be specified in advance, but in practice times of visits may vary due to patient and hospital pressures. The states of disease progression models often include death. Death times are commonly recorded to within a day. Also observations may be censored. For example, at the end of a study, an individual may be known only to be alive, and in an unknown state.
+
+Time-to-event outcomes such as overall survival, progression-free-survival, or complete response are common clinical endpoints in oncology trials. These outcomes are often analyzed using common methods for survival or competing risks data such as the Kaplan-Meier estimator or the cumulative incidence function for descriptive analyses, or the log-rank test, the Cox proportional hazards regression, the Gray's test, or the Fine-Gray model^4^ for inferences. These methods are appropriate and sufficient to understand treatment effects in settings where the disease process and the treatment options are simple or in situations where the only comparison of interest is the treatment effects on the final outcome regardless of intermediate events (as in intent-to-treat analyses). However, in trials where the combinations of disease process and treatment options are more complex or where intermediate events influence the trial outcomes, these standard methods alone do not provide a comprehensive picture of the effect of treatment on the intermediate events leading to the final outcome. Multistate models are a powerful and flexible tool to explore treatment effects on intermediate events along multiple paths that patients can experience in these complex situations.
+
+Each model consists of a set of states that one can occupy and the directions and states to which one can transition. A state in a multi-state model can be transient which means a subject can transition out of that state, or terminal which means, once a subject enters that state, departure is not possible.
+
+### Time-homogenous Models
+
+In a time-homogeneous multistate model, the transition probabilities between states remain constant over time. This means that the rates at which individuals move from one state to another do not change as time progresses. Time-homogeneous models are simpler to work with and often serve as the foundation for understanding more complex scenarios.
+
+### Time Non-homogenous Models
+
+In a time-nonhomogeneous multistate model, the transition probabilities between states can vary over time. This means that the rates at which individuals move between states may change as time progresses. Time-nonhomogeneous models are used to capture scenarios where the underlying dynamics of transitions are influenced by time-varying factors.
+
+Continuing with the disease progression example, a time-nonhomogeneous model might account for changes in transition probabilities based on factors such as treatment, age, or other time-varying covariates. This adds complexity but allows for more realistic representation of dynamic processes.
+
+### General Multistate Models
+
+::: panel.tabset
+#### Survival
+
+```{mermaid}
+graph LR
+ALIVE-->DEAD
+```
+
+#### Sequential
+
+```{mermaid}
+graph LR
+S1-->S2-->S3
+```
+
+#### Competing Risks
+
+```{mermaid}
+graph LR
+S1-->S2
+S1-->S3
+```
+
+#### Illness-Death
+
+```{mermaid}
+graph LR
+S1-->S2
+S2-->S3
+S1-->S3
+```
+:::
+
+Here's some code to demonstrate each model in a time-homogenous case.
+
+### Sequential
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+sequential <- '
+$PARAM
+k12 = 0.05;
+k23 = 0.01;
+
+$CMT
+S1 S2 S3
+
+$ODE
+dxdt_S1 =    -S1*k12;
+dxdt_S2 =    k12*S1 - k23*S2;
+dxdt_S3 =    k23*S2;
+
+$TABLE
+if((EVID==0)) {
+double CUP1 = S1;
+double CUP2 = S1 + S2;
+double CUP3 = S1 + S2 + S3;
+}
+
+$CAPTURE
+CUP1 CUP2 CUP3
+'
+
+sequential <- mcode('sequential', sequential)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+sequential %>%
+  data_set(data.frame(ID=1, amt=1, time=0, cmt=1, evid=1)) %>%
+  mrgsim(end = 50, delta=1) %>%
+  plot(S1+S2+S3~time)
+```
+
+### Competing Risks
+
+Competing risks analysis is a statistical methodology used in survival analysis to handle situations where there are multiple mutually exclusive events that can prevent the occurrence of the event of interest. It's particularly relevant in situations where individuals are subject to different types of failure modes, and the occurrence of one type of failure may preclude the occurrence of others.
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+cr <- '
+$PARAM
+k12 = 0.05;
+k13 = 0.01;
+
+$CMT
+S1 S2 S3
+
+$ODE
+dxdt_S1 =    -(k12+k13)*S1;
+dxdt_S2 =    k12*S1;
+dxdt_S3 =    k13*S1;
+
+$TABLE
+if((EVID==0)) {
+double CUP1 = S1;
+double CUP2 = S1 + S2;
+double CUP3 = S1 + S2 + S3;
+}
+
+$CAPTURE
+CUP1 CUP2 CUP3
+'
+
+cr <- mcode('cr', cr)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+cr %>%
+  data_set(data.frame(ID=1, amt=1, time=0, cmt=1, evid=1)) %>%
+  mrgsim(end = 50, delta=1) %>%
+  plot(S1+S2+S3~time)
+```
+
+### Illness-death with recovery
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+idr <- '
+$PARAM
+k12 = 0.05;
+k21 = 0.03;
+k23 = 0.03;
+k13 = 0.01;
+
+$CMT
+S1 S2 S3
+
+$ODE
+dxdt_S1 =    -(k12+k13)*S1 + k21*S2;
+dxdt_S2 =    k12*S1 - k23*S2;
+dxdt_S3 =    k13*S1 + k23*S2;
+
+$TABLE
+if((EVID==0)) {
+double CUP1 = S1;
+double CUP2 = S1 + S2;
+double CUP3 = S1 + S2 + S3;
+}
+
+$CAPTURE
+CUP1 CUP2 CUP3
+'
+
+idr <- mcode('idr', idr)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+idr %>%
+  data_set(data.frame(ID=1, amt=1, time=0, cmt=1, evid=1)) %>%
+  mrgsim(end = 50, delta=1) %>%
+  plot(S1+S2+S3~time)
+```
+
+### Simulating Longitudinal Data with Multistate models
+
+Here I expand the model a bit and demonstrate below how to actually simulate individual data for multistate models. It's quite involved...
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+code <- '
+$PLUGIN Rcpp
+
+$PARAM
+k12 = 0.4;
+k13 = 0.02;
+k15 = 0.001;
+
+k23 = 0.02;
+k25 = 0.001;
+
+k341 = 0.6;
+k342 = 0.001;
+k35 = 0.01;
+
+k45 = 0.1;
+
+$CMT
+S1 S2 S3 S4 S5
+
+$MAIN
+// set bioavailability
+if(NEWIND <=1){
+double BIO1 = 1;
+double BIO2 = 0;
+double BIO3 = 0;
+double BIO4 = 0;
+double BIO5 = 0;
+}
+
+// mixture model for second line or state 4
+// here i define 50% chance of state 4
+
+if(NEWIND <=1) {
+  int POP1 = 1 + R::rbinom(1,0.5);
+}
+
+if((POP1 ==1)) double k34 = k341;
+if((POP1 ==2)) k34 = k342;
+
+// update compartments via bioavailability factors 
+F_S1 = BIO1;
+F_S2 = BIO2;
+F_S3 = BIO3;
+F_S4 = BIO4;
+F_S5 = BIO5;
+
+$ODE
+dxdt_S1 =  - S1*(k12 + k13 + k15);
+dxdt_S2 =    k12*S1 - (k23*S2 + k25*S2);
+dxdt_S3 =    k23 *S2 + k13*S1 - (k34*S3 + k35*S3);
+dxdt_S4 =    k34*S3 - k45*S4;
+dxdt_S5 =    k15*S1+ k25*S2 + k35*S3 + k45*S4;
+
+
+$TABLE
+//random number drawn from a uniform dist. at each observation time point
+if(EVID==0) double USUR = R::runif(0,1);
+
+if((EVID==0)) {
+double CUP1 = S1;
+double CUP2 = S1 + S2;
+double CUP3 = S1 + S2 + S3;
+double CUP4 = S1 + S2 + S3 + S4;
+double CUP5 = S1 + S2 + S3 + S4 + S5; 
+}
+//CUP5 always=1, not needed actually
+
+// pdv= previous dv, store last observations dv
+if(NEWIND <=1) double PDV = 1;
+
+//DV1 = state or simulated dv
+if(NEWIND <=1) double DV1 = PDV;
+
+// define patient state based on cumulative probabilities (CUP)
+if((TIME>0) & (EVID==0)) {
+  if(USUR <= CUP1) DV1 = 1;
+  if((USUR > CUP1)  & (USUR <= CUP2)) DV1 = 2;
+  if((USUR > CUP2)  & (USUR <= CUP3)) DV1 = 3;
+  if((USUR > CUP3)  & (USUR <= CUP4)) DV1 = 4;
+  if( (DV1 ==4) & (PDV != 3)) DV1 = PDV;
+  if(USUR > CUP4)  DV1 = 5;
+}
+
+// update pdv and bio factors
+if(EVID != 0) PDV = DV1;
+
+if((TIME>0) & (DV1==1) & (EVID==0)) {
+  BIO1 = 1;
+  BIO2 = 0;
+  BIO3 = 0;
+  BIO4 = 0;
+  BIO5 = 0;
+}
+
+if((TIME>0) & (DV1==2) & (EVID==0)) {
+  BIO1 = 0;
+  BIO2 = 1;
+  BIO3 = 0;
+  BIO4 = 0;
+  BIO5 = 0;
+}
+
+if((TIME>0) & (DV1==3) & (EVID==0)) {
+  BIO1 = 0;
+  BIO2 = 0;
+  BIO3 = 1;
+  BIO4 = 0;
+  BIO5 = 0;
+}
+
+if((TIME>0) & (DV1==4) & (EVID==0)) {
+  BIO1 = 0;
+  BIO2 = 0;
+  BIO3 = 0;
+  BIO4 = 1;
+  BIO5 = 0;
+}
+
+if((TIME>0) & (DV1==5) & (EVID==0)) {
+  BIO1 = 0;
+  BIO2 = 0;
+  BIO3 = 0;
+  BIO4 = 0;
+  BIO5 = 1;
+}
+
+$CAPTURE
+CUP1 CUP2 CUP3 CUP4 DV1 PDV BIO1 BIO2 BIO3 BIO4 BIO5 USUR
+'
+  
+mod <- mcode("example_mst", code)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+EVID4_data <- c(
+  ev(ID=1, amt = 1, time = 0, cmt = 1, evid = 4),
+  ev(ID=1, amt = 1, time = 0, cmt = 2),
+  ev(ID=1, amt = 1, time = 0, cmt = 3),
+  ev(ID=1, amt = 1, time = 0, cmt = 4),
+  ev(ID=1, amt = 1, time = 0, cmt = 5)) %>% 
+  expand_observations(times = c(9))
+
+# number of observations required
+data_points = 10
+
+sim_data <-  data.frame(EVID4_data)
+
+for (nobs in 1:data_points) {
+  sim_data <- sim_data %>% 
+    bind_rows(data.frame(EVID4_data) %>% 
+                mutate(time=time+9*nobs))
+}
+
+# at time=0, only one record with cmt 1 required (no harm having additional rows though)
+final_sim_data <-  sim_data %>% 
+  filter(!(time==0 & cmt>1))
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+# simulation and plot of simulated dvs
+set.seed(1234)
+sim_output <- mrgsim(mod,
+       data= final_sim_data,
+       carry_out = "evid,cmt") %>%
+  as.data.frame %>% signif(3)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+# plot of longitudinal state transitions
+sim_output %>%
+  ggplot(., aes(x=time, y=DV1))+
+  geom_point(aes(color=factor(DV1)), size=5)+
+  geom_line()+
+  theme_classic()+
+  labs(y="State", x='Time')+ 
+  guides(color=guide_legend(title="State"))+
+  theme(axis.text=element_text(size=15),
+        axis.title=element_text(size=17))
+```
+
+### Hidden Markov Models
+
+Hidden Markov Models (HMMs) are statistical models used to describe systems where you observe a sequence of outputs, but the underlying system that generates those outputs is not directly observable. In other words, you have a sequence of observations, and each observation corresponds to a state, but you don't know which state generated which observation. HMMs are widely used in various fields, including speech recognition, natural language processing, bioinformatics, and more. Given a sequence of observations, the goal is to find the most likely sequence of hidden states (states that generated those observations). This involves estimating both the sequence of hidden states and the parameters of the model (transition probabilities and emission probabilities).
+
+Below I simulate a Hidden Markov Model in which there are four states in a sequential structure. The observable variable is of a count data type, with differing "emission distributions" depending on the state that the individual is in. **IN PROGRESS**
+
+```{r}
+HMM <- '
+$PLUGIN Rcpp
+
+$PARAM
+k12 = 0.4;
+k23 = 0.02;
+k34 = 0.001;
+
+$CMT
+S1 S2 S3 S4
+
+$MAIN
+// set bioavailability
+if(NEWIND <=1){
+double BIO1 = 1;
+double BIO2 = 0;
+double BIO3 = 0;
+double BIO4 = 0;
+double BIO5 = 0;
+}
+
+// update compartments via bioavailability factors 
+F_S1 = BIO1;
+F_S2 = BIO2;
+F_S3 = BIO3;
+F_S4 = BIO4;
+
+$ODE
+dxdt_S1 =    -k12*S1;
+dxdt_S2 =    k12*S1 - k23*S2;
+dxdt_S3 =    k34*S2 - k34*S3;
+dxdt_S4 =    k34*S3;
+
+
+$TABLE
+//random number drawn from a uniform dist. at each observation time point
+if(EVID==0) double USUR = R::runif(0,1);
+
+if((EVID==0)) {
+double CUP1 = S1;
+double CUP2 = S1 + S2;
+double CUP3 = S1 + S2 + S3;
+double CUP4 = S1 + S2 + S3 + S4;
+}
+//CUP5 always=1, not needed actually
+
+// pdv= previous dv, store last observations dv
+if(NEWIND <=1) double PDV = 1;
+
+//DV1 = state or simulated dv
+if(NEWIND <=1) double DV1 = PDV;
+
+// define patient state based on cumulative probabilities (CUP)
+if((TIME>0) & (EVID==0)) {
+  if(USUR <= CUP1) DV1 = 1;
+  if((USUR > CUP1)  & (USUR <= CUP2)) DV1 = 2;
+  if((USUR > CUP2)  & (USUR <= CUP3)) DV1 = 3;
+  if((USUR > CUP3)  & (USUR <= CUP4)) DV1 = 4;
+  if( (DV1 ==4) & (PDV != 3)) DV1 = PDV;
+  if(USUR > CUP4)  DV1 = 5;
+}
+
+// update pdv and bio factors
+if(EVID != 0) PDV = DV1;
+
+if((TIME>0) & (DV1==1) & (EVID==0)) {
+  BIO1 = 1;
+  BIO2 = 0;
+  BIO3 = 0;
+  BIO4 = 0;
+  BIO5 = 0;
+}
+
+if((TIME>0) & (DV1==2) & (EVID==0)) {
+  BIO1 = 0;
+  BIO2 = 1;
+  BIO3 = 0;
+  BIO4 = 0;
+  BIO5 = 0;
+}
+
+if((TIME>0) & (DV1==3) & (EVID==0)) {
+  BIO1 = 0;
+  BIO2 = 0;
+  BIO3 = 1;
+  BIO4 = 0;
+  BIO5 = 0;
+}
+
+if((TIME>0) & (DV1==4) & (EVID==0)) {
+  BIO1 = 0;
+  BIO2 = 0;
+  BIO3 = 0;
+  BIO4 = 1;
+  BIO5 = 0;
+}
+
+if((TIME>0) & (DV1==5) & (EVID==0)) {
+  BIO1 = 0;
+  BIO2 = 0;
+  BIO3 = 0;
+  BIO4 = 0;
+  BIO5 = 1;
+}
+
+$CAPTURE
+CUP1 CUP2 CUP3 CUP4 DV1 PDV BIO1 BIO2 BIO3 BIO4 BIO5 USUR
+'
+  
+mod <- mcode("example_mst", code)
+```
+
+Fitting Hidden Markov Models in NONMEM was demonstrated in [@brekkan2019]
+
+```{r}
+setwd("C:/Users/tcdb78/Documents/")
+hmm <- mread('HMM.cpp')
+```
+
+```{r}
+set.seed(1234)
+ids <- data.frame(ID=1:100, TRT = rbinom(100, 1, 0.5))
+data1 <- crossing(ids, TIME=0:12, EVID=c(0,1)) %>%
+  group_by(ID) %>%
+  arrange(ID, TIME, EVID)
+```
+
+```{r}
+hmm %>%
+  #data_set(data) %>%
+  mrgsim(data1) %>%
+  as.data.frame() %>% 
+  filter(EVID==0) %>% 
+  group_by(TRT, TIME, STATE) %>%
+  summarise(n = n()) %>%
+  mutate(prop = ifelse(TRT==0, n/55, n/45)) %>%
+  ggplot(., aes(TIME, prop)) +
+  geom_line(aes(color=factor(TRT))) +
+  theme_bw() +
+  facet_wrap(~STATE)
+```
+
+```{r}
+hmm %>%
+  #data_set(data) %>%
+  mrgsim(data1) %>%
+  as.data.frame() %>% 
+  filter(EVID==0) %>% 
+  ggplot(., aes(TIME)) +
+  geom_point(aes(y=exp(VAR1))) +
+  #geom_point(aes(y=VAR2)) +
+  theme_bw() +
+  facet_wrap(~TRT)
+```
+
+### References

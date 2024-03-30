@@ -1,0 +1,737 @@
+---
+title: "Pharmacokinetic Models"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Pharmacokinetic Models
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+library(tidyverse)
+library(mrgsolve)
+library(DiagrammeR)
+```
+
+## Overview
+
+Pharmacokinetics (PK) is the study of how drugs move through the body, or more colloquially, "what the body does to the drug", encompassing processes such as absorption, distribution, metabolism, and elimination (ADME). A PK model is a mathematical framework that can help quantify the time course of these processes to predict drug concentrations in the body over time, identify patient factors affecting drug disposition, facilitate implementation of dose optimization strategies, and much more. It may be my biased opinion, but these modeling endeavors are critical to promoting the rationale use of therapeutics and facilitating efficient drug development.
+
+### Pharmacokinetic parameters
+
+Below is a table of PK parameters commonly used in PK models. It is by no means comprehensive.
+
+| Parameter                        | Description                                                                                                                           |
+|--------------------|----------------------------------------------------|
+| Clearance                        | The rate at which a drug is removed from the body (elimination or metabolism) relative to its concentration.                          |
+| Volume of Distribution (Vd)      | The apparent space the drug appears to occupy in the body relative to its concentration.                                              |
+| Bioavailability (F)              | The fraction of a drug that reaches systemic circulation after administration (oral, intravenous, etc.).                              |
+| Absorption rate (Ka)             | A first order rate constant that is used to characterize the rate of "appearance" of drug into the plasma (or the relevant biomatrix) |
+| lag time (TLAG)                  | The delay in time to apparent initiation of absorption (i.e., delayed release formulations)                                           |
+| Cmax                             | Maximum concentration observed during a dosing window                                                                                 |
+| Area under the curve (AUC)       | Area under the concentration-time curve; provides a more robust way to quantify drug exposure                                         |
+| Intercompartmental clearance (Q) | Distribution rate between compartments (i.e., central and peripheral)                                                                 |
+
+## Compartmental models
+
+::: callout-important
+An understanding of the difference between zero-, first-, and (rarely) second-order processes is absolutely crucial to working with compartmental models.
+:::
+
+#### One-compartment model
+
+One-compartment models are the simplest compartmental models. Notably, when drugs are given orally, we include an "absorption compartment" but do not include this when we characterize how many "compartments" this drug follows because we only care about the rate of absorption from the absorption compartment, not the concentration of drug within it. The example below demonstrates a one-compartment model with first order elimination and first-order absorption.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+pk1_code <- '
+$PARAM @annotated
+TVKA   : 0.6 : Absorption rate constant (1/hr)
+TVCL   :  6  : Clearance (volume/time)
+TVV1    : 15  : Central volume (volume)
+
+$CMT  @annotated
+ABS    : Extravascular compartment (mass)
+CENT   : Central compartment (mass)
+
+$OMEGA @annotated
+eKA : 0.09  : eta KA
+eCL : 0.09  : eta CL
+eV1  : 0.09  : eta V
+
+$GLOBAL
+#define CP (CENT/V1)
+
+$MAIN
+double KA = TVKA*exp(eKA);
+double CL = TVCL*exp(eCL);
+double V1 = TVV1*exp(eV1);
+
+$ODE
+dxdt_ABS    = -KA*ABS;
+dxdt_CENT   =  KA*ABS - CL*CP;
+
+$SIGMA @annotated
+PROP  : 0.05   : proportional error
+
+$TABLE
+capture DV = CP*(1+PROP);
+
+// this resimulates observation if DV is negative
+while(DV <= 0) {
+  simeps();
+  DV = CP*(1+PROP);
+}
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+DV : dependent variable
+TVKA : typical value first order absorption
+TVCL : typical value clearance
+TVV1 : typical value volume of distribution
+'
+  
+pk1 <- mcode("pk1", pk1_code)
+```
+
+Place the dose into the "first" compartment to simulate intravenous dosing. In the code below, the zero_re() function is used to remove the random effects from the model. Comment this out with to see the interindividual variability (IIV) among the five simulated individuals. Use the addl argument to specify the number of additional doses and ii to specify the interdose interval (i.e., q12h, q24h). cmt=1 puts the dose into the absorption compartment.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+e <- data.frame(ID=1:5, amt=100, ii=24, addl=3, cmt=1, evid=1)
+
+pk1 %>%
+  ev(amt=100) %>%
+  zero_re() %>% # this removes random effects; comment out to see IIV
+  mrgsim(end = 100, delta=1) %>% 
+  plot(CP~time)
+```
+
+Place the dose into the "second" (cmt=2) compartment to simulate intravenous dosing. Modify ii and addl to change the inter-dose interval and the number of additional doses given, respectively. Change end and delta to modify the simulation length and observation frequency, respectively.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+e <- data.frame(ID=1:5, amt=100, ii=24, addl=3, cmt=2, evid=1)
+
+pk1 %>%
+  ev(amt=100) %>%
+  mrgsim(end = 100, delta=1) %>% 
+  plot(CP~time)
+```
+
+#### Two-compartment model
+
+In two-compartment models, the drug distributes between "central" and "peripheral" compartments. The central compartment is typically thought of as tissues well-perfused by the vascular supply (e.g., kidney) while peripheral compartments are thought of as tissues in which the drug distributes more slowly (e.g., bone).
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+pk2_code <- '
+$PARAM @annotated
+TVKA   : 0.6 : Absorption rate constant (1/time)
+TVCL   :  6  : Clearance (volume/time)
+TVV1    : 15  : Central volume (volume)
+TVV2   : 15  : Peripheral volume (volume)
+TVQ    : 5   : Intercompartment clearance (volume/time)
+
+$CMT  @annotated
+ABS    : Extravascular compartment (mass)
+CENT   : Central compartment (mass)
+PER    : Peripheral compartment (mass)
+
+$OMEGA @annotated
+eKA : 0.09  : eta KA
+eCL : 0.09  : eta CL
+eV1  : 0.09  : eta V
+eV2 : 0.09  : eta V2
+eQ  : 0.09  : eta Q
+
+$GLOBAL
+#define CP (CENT/V)
+#define CT (PER/V2)
+
+$MAIN
+double KA = TVKA*exp(eKA);
+double V1 = TVV1*exp(eV);
+double CL = TVCL*exp(eCL);
+double V2 = TVV2*exp(eV2);
+double Q = TVQ*exp(eQ);
+
+$ODE
+dxdt_ABS    = -KA*ABS;
+dxdt_CENT   =  KA*ABS - CL*CP - Q*CP + Q*CT;
+dxdt_PER    =  Q*CP - Q*CT;
+
+$SIGMA @annotated
+PROP  : 0.05   : proportional error
+
+$TABLE
+capture IPRED = CENT/V;
+capture DV = IPRED*(1+PROP);
+
+while(DV <= 0) {
+  simeps();
+  DV = IPRED*(1+PROP);
+}
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+TVKA   :  Absorption rate constant (1/time)
+TVCL   : Clearance (volume/time)
+TVV1    : Central volume (volume)
+TVV2   : Peripheral volume (volume)
+TVQ    : Intercompartment clearance (volume/time)
+'
+  
+pk2 <- mcode("pk2", pk2_code)
+```
+
+Because I have included TVKA, TVCL, etc in the \$CAPTURE block, you can modify these parameters directly in the e object below.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+e <- data.frame(ID=1:5, amt=100, ii=24, addl=3, cmt=1, evid=1, TVCL=8)
+
+pk2 %>%
+  ev(amt=100) %>%
+  mrgsim(end = 100, delta=1) %>% 
+  plot(CP~time)
+```
+
+#### Three-compartment model
+
+The three-compartment model adds an additional peripheral compartment. Note that the peripheral compartments are both connected only to the central compartment, not to each other.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+pk3_code <- '
+$PARAM @annotated
+TVKA   : 0.6 : Absorption rate constant (1/time)
+TVCL   :  6  : Clearance (volume/time)
+TVV1    : 15  : Central volume (volume)
+TVV2   : 15  : "shallow" Peripheral volume (volume)
+TVV3   : 15  : "deep" Peripheral volume (volume)
+TVQ    : 5   : Intercompartmental clearance (volume/time)
+TVQ2   : 1   : Intercompartmental clearance 2 (volume/time)
+
+$CMT  @annotated
+ABS    : Extravascular compartment (mass)
+CENT   : Central compartment (mass)
+PER    : Peripheral compartment (mass)
+PER2   : Peripheral compartment 2 (mass)
+
+$OMEGA @annotated
+eKA : 0.09  : eta KA
+eCL : 0.09  : eta CL
+eV1 : 0.09  : eta V1
+eV2 : 0.09  : eta V2
+eV3 : 0.09  : eta V3
+eQ  : 0.09  : eta Q
+eQ2 : 0.09  : eta Q2
+
+$GLOBAL
+#define CP (CENT/V1)
+#define CST (PER/V2)
+#define CDT (PER2/V3)
+
+$MAIN
+double KA = TVKA*exp(eKA);
+double CL = TVCL*exp(eCL);
+double V1 = TVV1*exp(eV1);
+double V2 = TVV2*exp(eV2);
+double V3 = TVV3*exp(eV3);
+double Q = TVQ*exp(eQ);
+double Q2 = TVQ2*exp(eQ2);
+
+$ODE
+dxdt_ABS    = -KA*ABS;
+dxdt_CENT   =  KA*ABS - (CL+Q+Q2)*CP + Q*CST + Q2*CDT;
+dxdt_PER    =  Q*CP - Q*CST;
+dxdt_PER2   =  Q2*CP - Q2*CDT;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+'
+pk3 <- mcode("pk3", pk3_code)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+e <- data.frame(ID=1, amt=300, ii=24, addl=5, cmt=1, evid=1)
+
+pk3 %>%
+  ev(e) %>%
+  zero_re() %>%
+  mrgsim(end = 200, delta=1) %>% 
+  plot(CP~time, logy=TRUE)
+```
+
+### Nonlinear Pharmacokinetics
+
+Nonlinear PK govern disposition when there is a disproportionate change in tissue or serum concentrations with increasing dose. Often this is due to saturation of one the ADME processes.
+
+| ADME Process | Example                                                                      |
+|-------------------|-----------------------------------------------------|
+| Absorption   | Saturable transport of p-glycoprotein transporters in the intestine          |
+| Distribution | Plasma protein binding; cellular uptake                                      |
+| Metabolism   | Saturation of CYP450 enzymes                                                 |
+| Elimination  | Saturation of renal filtration, tubular secretion, reabsorption transporters |
+
+#### Michaelis-Menten Kinetics
+
+$$
+V = \frac{-dX}{dt}=\frac{V_{max}}{K_m+C}
+$$
+
+where $V$ is the velocity of the reaction, $V_{max}$ is the maximum velocity, $C$ is the concentration, and $K_m$ is the concentration at which half the maximal velocity of the reaction is achieved. Notice how the slopes become parallel when the concentration is in the linear elimination phase.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+nlcl <- '
+$PARAM @annotated
+V    : 10  : Central volume (volume)
+VMAX :  2  : Maximum reaction velocity (mass/time)
+KM   :  5  : Michaelis constant (mass/volume)
+    
+$CMT  @annotated
+CENT   : Central compartment (mass)
+
+$GLOBAL
+#define CONC (CENT/V)
+#define CL (VMAX/(KM+CONC))*V
+
+$ODE
+dxdt_CENT =  - CL*CONC;
+
+$CAPTURE @annotated
+CONC : Plasma concentration (mass/volume)
+VMAX : Maximum reaction velocity (mass/time)
+KM   : Michaelis constant (mass/volume)
+CL   : Clearance (L/hr)
+'
+
+nlcl <- mcode('nlcl', nlcl)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+e <- data.frame(ID=1:3, amt=c(50, 100, 300), cmt=1, evid=1)
+
+nlcl %>%
+  ev(e) %>%
+  mrgsim(end = 48, delta=1) %>% 
+  plot(CONC~time, logy=TRUE)
+```
+
+### Nonlinear Distribution
+
+**NOT DONE**. Would like to include a cellular compartment to show saturatble distribution into blood cells. The example below demonstrates a case of nonlinear distribution where the drug is taken up by cells in the central compartment via a saturable mechanism.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+nld <- '
+$PARAM @annotated
+VC   : 10  : Central volume (volume)
+VP   : 2    : Cell volume (volume)
+k10   : 0.3   : Clearance from central compartment (mass/time)
+k12   : 0.1   : transfer cent to per (mass/time)
+k21   : 0.1   : transfer per to cent (mass/time)
+VMAX :  0.3  : Maximum reaction velocity (mass/time)
+KM   :  5  : Michaelis constant (mass/volume)
+    
+$CMT  @annotated
+CENT   : Central compartment (mass)
+PER    : Peripheral compartment (mass)
+
+$GLOBAL
+#define CP (CENT/VC)
+#define CT (PER/VP)
+#define k12 (VMAX/(KM+CP))
+
+$ODE
+dxdt_CENT =  - k10*CENT - k12*CENT + k21*PER;
+dxdt_PER = k12*CENT - k21*PER;
+
+$CAPTURE @annotated
+CP   : Plasma concentration (mass/volume)
+CT   : Cell concentration (mass/volume)
+VMAX : Maximum reaction velocity (mass/time)
+KM   : Michaelis constant (mass/volume)
+'
+
+nld <- mcode('nld', nld)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+e <- data.frame(ID=1:5, amt=c(100, 200, 500, 1000, 2000), cmt=1, evid=1)
+
+nld %>%
+  ev(e) %>%
+  mrgsim(end = 24, delta=1) %>% 
+  plot(CENT+PER~time, logy=TRUE)
+```
+
+## Absorption Models
+
+Drug absorption describes how the drug enters the central plasma and there are many models to describe the complexities of this process. Modeling drug absorption is one of the trickiest aspects of compartmental modeling. Often, there is just not enough data in the absorption phase to fit the model you really want to fit, so you are forced to fit one of the simpler models.
+
+### First-order absorption with bioavailability
+
+First order absorption represents a constant fraction of the available drug in the absorption compartment entering the central compartment per unit time.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+first_order_F <- '
+$PARAM @annotated
+TVKA   : 0.1 : Absorption rate constant (1/hr)
+TVF    : 0.7 : typical value bioavailability fraction (%)
+TVCL   :  6  : Clearance (volume/time)
+TVV1    : 15  : Central volume (volume)
+
+$CMT  @annotated
+ABS    : Extravascular compartment (mass)
+CENT   : Central compartment (mass)
+
+$OMEGA @annotated
+eKA : 0.09  : eta KA
+eCL : 0.09  : eta CL
+eV1  : 0.09  : eta V
+
+$GLOBAL
+#define CP (CENT/V1)
+
+$MAIN
+F_ABS = TVF;
+double KA = TVKA*exp(eKA);
+double CL = TVCL*exp(eCL);
+double V1 = TVV1*exp(eV1);
+
+$ODE
+dxdt_ABS   = -KA*ABS;
+dxdt_CENT  =  KA*ABS - CL*CP;
+
+$SIGMA @annotated
+ADD  : 0.1   : additive error
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+'
+  
+first_order_F <- mcode('first_order_F', first_order_F)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+e <- data.frame(ID=1:5, amt=100, ii=24, addl=3, cmt=1, evid=1)
+
+first_order_F %>%
+  ev(e) %>%
+  mrgsim(end = 100, delta=1) %>% 
+  plot(CP~time)
+```
+
+### Zero-order absorption
+
+Zero-order absorption describes an absorption process in which a constant amount of drug enters the central compartment from the absorption compartment per unit time.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+zero_order_abs <- '
+$PARAM @annotated 
+CL   : 5   : 
+V1   :  20 :
+DUR  : 3 : 
+ 
+$CMT CENT
+
+$GLOBAL
+#define CP (CENT/V1)
+
+$MAIN
+D_CENT = DUR;
+ 
+$ODE
+dxdt_CENT = -CL*CP;
+
+$CAPTURE @annotated
+CP : plasma concentration
+CL : clearance
+V1 : volume of distribution
+DUR : duration of zero-order absorption
+'
+
+zero_order_abs <- mcode('zero_order_abs', zero_order_abs)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+e <- data.frame(ID=1, amt=200, rate=-2, cmt=1, time=0, evid=1, DUR=5, CL=10)
+
+zero_order_abs %>%
+  ev(e) %>%
+  mrgsim(end = 24, delta=0.1) %>%
+  plot(CP~time, logy=TRUE)
+```
+
+### First order absorption with LAG time
+
+This model is often used when there are delays in the absorption profile (e.g., with a delayed release formulation) and the PK data in the absorption phase are sparse. It often improves the model fit, but may be criticized for being un-physiological. I'd agree in most situations, but think this type of model is very reasonable when you have an actual delayed release formulation. Another limitation to this model is that it can cause numerical difficulties with some of the estimation algorithms (FOCE). These ODE solvers really don't like when the value of compartments is 0, and this is exactly the case with this model for time points before the LAG time.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+first_order_abs_w_lag <- '
+$PARAM @annotated
+TVKA   : 0.6 : Absorption rate constant (1/hr)
+TVTLAG : 1.5 : typical value lag time (time)
+TVCL   :  6  : Clearance (volume/time)
+TVV1    : 15  : Central volume (volume)
+
+$CMT  @annotated
+ABS    : Extravascular compartment (mass)
+CENT   : Central compartment (mass)
+
+$OMEGA @annotated
+eKA : 0.09  : eta KA
+eTLAG : 0.09 : eta TLAG
+eCL : 0.09  : eta CL
+eV1  : 0.09  : eta V
+
+$GLOBAL
+#define CP (CENT/V1)
+
+$MAIN
+double TLAG = TVTLAG*exp(eTLAG);
+ALAG_ABS = TLAG;
+double KA = TVKA*exp(eKA);
+double CL = TVCL*exp(eCL);
+double V1 = TVV1*exp(eV1);
+
+$ODE
+dxdt_ABS   = -KA*ABS;
+dxdt_CENT  =  KA*ABS - CL*CP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+TVTLAG : lag time
+TVKA : individual KA
+TVCL : individual CL
+TVV1 : individual V1 
+'
+first_order_abs_w_lag <- mcode('first_order_abs_w_lag', first_order_abs_w_lag)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+e <- data.frame(ID=1:5, amt=100, ii=24, addl=3, cmt=1, evid=1, TVTLAG=3)
+
+first_order_abs_w_lag %>%
+  ev(e) %>%
+  mrgsim(end = 100, delta=1) %>% 
+  plot(CP~time)
+```
+
+### Mixed zero- and first- order absorption
+
+Sometimes a combination of absorption processes may be a reasonably hypothesized. The sequential linked zero-order then first-order model can be interpreted in a mechanistic way if the concentration in the gut is initially at the solubility limit for the drug. As drug is absorbed and the concentration falls below the solubility limiT then the process converts from a zero-order input to a first-order input. Note that ALAG1 (lag time of the first order process) must be equal to TK0 (the duration of the zero-order process) plus any lagtime for the zero-order process. This ensures that the first-order process will take over at the end of the zero-order input.
+
+**NOT DONE.**
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+mixed_abs <- '
+$PARAM @annotated
+CL :  1  : clearance
+VC : 20  : central volume
+KA : 1.1 : first order absorption rate
+FRAC : 0.2 : fraction
+DUR : 3 : duration of zero-order absorption
+ 
+$CMT @annotated
+ABS1 : absorption compartment 1
+ABS2 : absorption compartment 2
+CENT : Central compartment
+
+$MAIN
+F_ABS = 1-FRAC;
+F_CENT = FRAC;
+D_CENT = DUR;
+
+$GLOBAL
+#define CP (CENT/VC)
+ 
+$ODE
+dxdt_ABS = -KA*ABS;
+dxdt_CENT = KA*ABS - (CL/VC)*CENT;
+
+$CAPTURE @annotated
+CP : Plasma concentration
+'
+
+mixed_abs <- mcode('mixed_abs', mixed_abs)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+```
+
+### Weibull Absorption
+
+The Weibull distribution may be used to model time-varying absorption rates. There are many ways to parameterize a weibull model.
+
+$$
+KA_{(t)}=\frac{\beta}{\alpha}(\frac{time}{\alpha})^{\beta-1}
+$$
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+weibull_abs <- '
+$PARAM @annotated 
+CL   : 5   : clearance
+VC   :  20 : volume of distribution
+BETA : 3   : beta
+ALPHA: 2   : alpha
+ 
+$CMT ABS CENT
+
+$MAIN
+double KA = (BETA/ALPHA)*pow((TIME/ALPHA), (BETA-1));
+double CP = CENT/VC;
+ 
+$ODE
+dxdt_ABS = -KA*ABS;
+dxdt_CENT = KA*ABS - (CL/VC)*CENT;
+
+$CAPTURE @annotated
+CP : plasma concentration 
+KA : absorption rate constant
+BETA : weibull parameter
+ALPHA : weibull parameter
+'
+
+weibull_abs <- mcode('weibull_abs', weibull_abs)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+weibull_abs %>%
+  ev(amt=100) %>%
+  mrgsim(end=20, delta=0.1) %>%
+  plot(KA+CP~time)
+```
+
+### Transit Absorption
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+transit_abs <- '
+$PARAM @annotated
+KA   : 0.6 : Absorption rate constant (1/hr)
+CL   :  6  : Clearance (volume/time)
+V1    : 15  : Central volume (volume)
+MTT   : 20   : mean transit time
+  
+$CMT  @annotated
+ABS    : Extravascular compartment (mass)
+TRAN1  : Transit compartment 1
+TRAN2  : Transit compartment 2
+TRAN3  : Transit compartment 3
+CENT   : Central compartment (mass)
+
+$GLOBAL
+#define CP (CENT/V1)
+
+$MAIN
+double ktr = 4/MTT;
+double k12 = ktr;
+double k23 = ktr;
+double k34 = ktr;
+double k45 = ktr;
+double k10 = CL/V1;
+
+$ODE
+dxdt_ABS   = -k12*ABS;
+dxdt_TRAN1 = k12*ABS - k23*TRAN1;
+dxdt_TRAN2 = k23*TRAN1 - k34*TRAN2;
+dxdt_TRAN3 = k34*TRAN2 - k45*TRAN3;
+dxdt_CENT  =  k45*TRAN3 - k10*CENT;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+MTT : mean transit time
+'
+  
+transit_abs <- mcode('transit_abs', transit_abs)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+transit_abs %>%
+  ev(amt=100) %>%
+  mrgsim(end=30, delta=1) %>%
+  plot(TRAN3+CENT+TRAN1+TRAN2~time)
+```
+
+### Enterohepatic Recycling
+
+TBD.
+
+### References

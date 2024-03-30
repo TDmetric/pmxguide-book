@@ -1,0 +1,39 @@
+---
+title: "Bayesian Sequential Designs"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    echo: false
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Bayesian Sequential Designs
+
+```{r}
+library(tidyverse)
+library(Hmisc)
+library(rms)
+```
+
+## Overview
+
+#### Rethinking t tests, anovas, etc.
+
+### Logistic regression
+
+### What should I put in my model?
+
+### Summary
+
+### References
+
+### Recommended Reading/Resources

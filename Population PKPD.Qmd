@@ -1,0 +1,448 @@
+---
+title: "Population PK/PD"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    echo: false
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+bibliography: references.bib
+---
+
+# Mixed Effects Models
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+library(tidyverse)
+library(mrgsolve)
+library(DiagrammeR)
+```
+
+### Background
+
+Mixed effects models are the bread and butter of pharmacometricians. Population pharmacokinetics (popPK) is the study of drug pharmacokinetics at the population level. Commonly, data from all individuals in a population are evaluated simultaneously using a nonlinear mixed-effects modeling approach. "Nonlinear" refers to the fact that the dependent variable (e.g., concentration) is nonlinearly related to the model parameters and independent variable(s). The "mixed" in mixed effects models refers to the fact that these models are composed of both fixed and random effects. Fixed effects quantify the typical, or average, magnitude for estimated parameters. Random effects quantify not the magnitude of effect but the variability in this effect within the data sample, and is often reported as a variance or standard deviation. Understanding the difference between these two types of parameters might be the first hurdle to overcome for every pharmacometrics student.
+
+When data is pooled from multiple subjects/patients (e.g., a clinical trial), mixed effects models are often the go-to modeling method. But why? There are several reasons. When multiple data observations (e.g., plasma concentration samples) are taken from a subject or patient, these samples are not independent of each other. You can imagine that two plasma concentrations of a renally eliminated drug taken from a patient with renal failure will both be higher than two samples taken from a patient with healthy kidneys at the same time points. This non-independence in samples taken violates an assumption of standard regression methods (that data samples are independent and identically distributed) leaving their parameter estimates highly bias. Random effects provide a way to account for this non-independence by adding a subsect-specific parameter, to respect the correlation of the data coming from the same individual. When we estimate random effects, we typically assume that the individual random effects are normally distributed with a mean of zero. That is, the random effects are centered around the fixed effect.
+
+$$ 
+\eta\sim N(0, \omega^2) 
+$$
+
+It is important to understand how different parameterizations of the fixed and random effects structure change the interpretation of the parameter values. There are a number of ways to parameterize the relationship between fixed and random effects, but by far the most common is an exponential structure.
+
+$$
+Cl_i=TVCL*exp(\eta_{CL})
+$$
+
+Here the clearance of the indvidiual patient $Cl_i$ is a function of the population typical value for clearance $TVCL$ (the fixed effect) and an exponentiated random effect $\eta_{CL}$. This parameterization creates a lognormal distribution for the clearance values in the population, which is nice because it constrains clearance to be strictly positive (drug clearance cannot be negative).
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+TVCL <- 10
+eta_cl <- rnorm(1000, 0, 0.3) # mean of zero and variance of 0.09 (0.3^2)
+Cli <- TVCL*exp(eta_cl)
+d <- data.frame(TVCL, eta_cl, Cli)
+
+d %>%
+  ggplot(., aes(Cli)) +
+  geom_histogram(fill='white', color='black') +
+  geom_vline(xintercept = TVCL, linetype='dashed', color='red', size=2) +
+  theme_classic() +
+  labs(x = 'Individual clearance values')
+```
+
+Note in other parameters such as,
+
+$$
+Cl_i=TVCL+\eta_{CL}
+$$
+
+the clearance value for the individual is not constrained to be positive and could theoretically could be negative for an individual.
+
+| Fixed+Random Effects Structure | Parameterization                     |
+|--------------------------------|--------------------------------------|
+| Exponential                    | $\theta_i=\theta_{pop}*exp(\eta_i)$  |
+| Additive                       | $\theta_i = \theta_{pop}+\eta_i$     |
+| Multiplicative                 | $\theta_i=\theta_{pop}*\eta_i$       |
+| Proportional                   | $\theta_i = \theta_{pop}*(1+\eta_i)$ |
+
+### Variance Models
+
+There are several potential sources of variability in population pharmacokinetic models: between-subject variability (BSV) and residual unexplained variability (RUV). RUV is variability that is unaccounted for after controlling for other sources of variability. When dosing data from multiple occassions are available, estimation of between-occasion variability (BOV). Developing an appropriate statistical model is important for covariate evaluations and to determine the amount of remaining variability in the data, as well as for simulation, an inherent use of models.
+
+| Col1                        | Level                                     |
+|-----------------------------|-------------------------------------------|
+| Between-group variability   | At the population level                   |
+| Between subject variability | Random effect for each subject            |
+| Inter-occassion variability | Random effect for each occassion          |
+| Observation                 | Variability at the observation (DV) level |
+
+#### Between Subject Variability (BSV)
+
+Between subject variability, or commonly referred to as intersubject variability, is included in models to quantify as you might imagine, the degree of variability in PK parameters within a population of interest. There are numerous ways to parameterize these aspects of the model, but by far, the most common is using an exponential structure.
+
+Etas (η) describe the subject specific deviation between the individual and the population typical value for the parameter. The different variances and covariances of η parameters are collected into an "Ω matrix." Pharmacokinetic data are often modeled assuming log-normal distributions because parameters must be positive and often right-skewed.22,23 Therefore, the CL of the ith subject (CLi) would be written as:
+
+When parameters are treated as arising from a log-normal distribution, the variance estimate (ω2) is the variance in the log-domain, which does not have the same magnitude as the θ values. The following equation converts the variance to a coefficient of variation (CV) in the original scale. For small ω2 (e.g., \<30%) the CV% can be approximated as the square root of ω2.
+
+#### Inter-occassion Variability
+
+Individual pharmacokinetic parameters can change between study occasions (Supplementary Data online). The source of the variability can sometimes be identified (e.g., changing patient status or compliance). Failing to account for BOV can result in a high incidence of statistically significant spurious period effects. Ignoring BOV can lead to a falsely optimistic impression of the potential value of therapeutic drug monitoring. When BOV is high, the benefits of dose adjustment based on previous observations may not translate to improved efficacy or safety.
+
+BOV was first defined as a component of residual unexplained variability (RUV)34 and subsequently cited as a component of BSV.35 BOV should be evaluated and included if appropriate. Parameterization of BOV can be accomplished as follows:
+
+```{r}
+pk1_code <- '
+$PARAM @annotated
+TVKA   : 0.6 : Absorption rate constant (1/hr)
+TVCL   :  6  : Clearance (volume/time)
+TVV1    : 15  : Central volume (volume)
+
+$CMT  @annotated
+ABS    : Extravascular compartment (mass)
+CENT   : Central compartment (mass)
+
+$OMEGA @annotated
+eKA : 0.09  : eta KA
+eCL : 0.09  : eta CL
+eV1  : 0.09  : eta V
+
+$GLOBAL
+#define CP (CENT/V)
+
+$MAIN
+double KA = TVKA*exp(eKA);
+double CL = TVCL*exp(eCL);
+double V1 = TVV1*exp(eV1);
+
+$ODE
+dxdt_ABS    = -KA*ABS;
+dxdt_CENT   =  KA*ABS - CL*CP;
+
+$SIGMA @annotated
+PROP  : 0.05   : proportional error
+
+$TABLE
+capture IPRED = CENT/V1;
+capture DV = IPRED*(1+PROP);
+
+while(DV <= 0) {
+  simeps();
+  DV = IPRED*(1+PROP);
+}
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+'
+  
+pk1 <- mcode("pk1", pk1_code)
+```
+
+### Residual Unexplained Variability (RUV)
+
+Residual unexplained variability (RUV) arises from multiple sources, including assay variability, errors in sample time collection, and model misspecification. Similar to BSV, selection of the RUV model is usually dependent on the type of data being evaluated.
+
+#### Additive error models
+
+Additive error models postulate that the residual unexplained variability is constant.
+
+$$
+DV = IPRED+\sigma
+$$
+
+```{r}
+set.seed(1234)
+conc <- seq(0.01, 10, length.out=1000)
+add_err <- rnorm(1000, 0, 0.3^2)
+DV <- conc + add_err
+
+ggplot(NULL, aes(conc, add_err)) +
+  geom_point() +
+  theme_classic() +
+  geom_hline(yintercept = 0, linetype = 'dashed', color='red', size=2) +
+  labs(x = 'Concentration', y = 'Error')
+```
+
+#### Multiplicative error models
+
+$$
+DV = IPRED*(1+\sigma)
+$$
+
+```{r}
+set.seed(1234)
+conc <- seq(0.01, 10, length.out=1000)
+mult_err <- rnorm(1000, 0, 0.3^2)
+DV <- conc*(1+mult_err)
+
+ggplot(NULL, aes(conc, DV)) +
+  geom_point() +
+  theme_classic() +
+  geom_hline(yintercept = 0, linetype = 'dashed', color='red', size=2) +
+  labs(x = 'Concentration', y = 'Error')
+```
+
+#### Combined additive plus multiplicative
+
+#### Exponential error
+
+#### Additive log-normal
+
+#### Poisson Residual error
+
+## The Omega matrix
+
+Most pharmacometric software will report an estimation of the variability of random effects in the "omega matrix", which is a variance-covariance matrix of the random effect estimates. The diagonals of the matrix are the variances and the off-diagonals are the covariances.
+
+$$
+\begin{bmatrix}
+0.09 & 0\\
+0.01 & 0.09
+\end{bmatrix}
+$$
+
+An omega matrix as shown above would correspond to a variance of 0.09 for both paramters with a covariance of 0.01.
+
+::: callout-note
+It is often assumed that PK parameters are independent of each other within individuals. Estimation of the covariance (off-diagonal) should be attempted but is sometimes limited by convergence issues. If there is a strong covariance between model parameters, it may be an indication of a covariate influencing both paramters (e.g., body weight being associated with both volume of distribution and clearance).
+:::
+
+## Diagnostic plots
+
+Below are code that I commonly use to produce standard diagnostic plots for Population PK models. Feel free to use them as templates for your own models.
+
+#### Residual Diagnostics
+
+::: panel-tabset
+#### DV vs PRED
+
+```{r}
+#| eval: false
+dvp2 <- 
+  out %>%
+  ggplot(., aes(PRED, DV, label=ID)) + 
+  geom_point(shape=19) +
+  geom_abline(slope = 1, color="red", linetype="solid", size=1) +
+  scale_x_continuous(breaks=c(0, 2, 4, 6, 8, 10), limits=c(0, 10)) +
+  scale_y_continuous(breaks=c(0, 2, 4, 6, 8, 10), limits=c(0, 10)) +
+  theme_classic() + 
+  theme(plot.title = element_text(face = "bold",
+        hjust = 0.5)) +
+  labs(title = "DV vs PRED", 
+           x = "PRED",
+           y = "DV") + 
+  theme(axis.text = element_text(size = 10)) +
+    theme(axis.title = element_text(size = 12,
+    face = "bold")) + theme(axis.text = element_text(colour = "black")) + theme(axis.title = element_text(size = 12),
+    plot.title = element_text(size = 14))
+
+dvp2
+```
+
+#### DV vs IPRED
+
+```{r}
+#| eval: false
+dvp1 <- 
+  out %>%
+  ggplot(., aes(IPRED, DV)) + 
+  geom_point(shape=19) +
+  geom_abline(slope = 1, color="red", linetype="solid", size=1) +
+  scale_x_continuous(breaks=c(0, 2, 4, 6, 8, 10), limits=c(0, 10)) +
+  scale_y_continuous(breaks=c(0, 2, 4, 6, 8, 10), limits=c(0, 10)) +
+  theme_classic() + 
+  theme(plot.title = element_text(face = "bold", hjust = 0.5)) +
+  labs(title = "DV vs IPRED", x = "IPRED", y = "DV") + 
+  theme(axis.title = element_text(size = 10,
+    face = "bold"), axis.text = element_text(size = 10)) + 
+  theme(axis.text = element_text(colour = "black")) + 
+  theme(axis.title = element_text(size = 12),
+    plot.title = element_text(size = 14)) 
+
+ggplotly()
+```
+
+#### CWRES vs PRED
+
+```{r}
+#| eval: false
+cp2 <- 
+  out %>%
+  ggplot(., aes(PRED, CWRES)) + 
+  geom_point(shape=19) +
+  geom_hline(yintercept = 0, color="red", linetype="solid", size=1) +
+  geom_hline(yintercept = c(-2.5, 2.5), color="black", linetype="dashed", size=0.75) +
+  scale_y_continuous(breaks = c(-5, -2.5, 0, 2.5, 5), limits=c(-5, 5)) +
+  theme_classic() + 
+  theme(
+    plot.title = element_text(face = "bold",
+        hjust = 0.5)) +
+  labs(title = "CWRES vs PRED", x = "PRED", y='CWRES') + 
+    theme(axis.text = element_text(size = 10)) + 
+  theme(axis.title = element_text(size = 10,
+    face = "bold")) + theme(axis.text = element_text(colour = "black")) + 
+  theme(axis.title = element_text(size = 12),
+    plot.title = element_text(size = 14)) 
+
+cp2
+```
+
+#### CWRES vs TIME
+
+```{r}
+#| eval: false
+cp1 <- 
+  out %>%
+  ggplot(., aes(TIME, CWRES)) + 
+  geom_point(shape=19) +
+  geom_hline(yintercept = 0, color="red", linetype="solid", size=1) +
+  geom_hline(yintercept = c(-2.5, 2.5), color="black", linetype="dashed", size=0.75) +
+  scale_y_continuous(breaks = c(-5, -2.5, 0, 2.5, 5), limits=c(-5, 5)) +
+  theme_classic() + 
+  theme(
+    plot.title = element_text(face = "bold",
+        hjust = 0.5)) +labs(title = "CWRES vs TAD", x = "TIME (hr)", y='CWRES') + 
+  theme(axis.text = element_text(size = 10)) +
+        theme(axis.title = element_text(size = 10,
+        face = "bold")) + theme(axis.text = element_text(colour = "black")) + 
+  theme(axis.title = element_text(size = 12),
+    plot.title = element_text(size = 14)) 
+
+cp1
+```
+:::
+
+#### Distribution Diagnostics
+
+One major assumption often made in mixed effects modeling is in the distribution of the random variables (ETAs and SIGMAs). In population PK/PD analysis, the subject specific deviation from the population typical value (ETAs) are often assumed to be normally distributed. This is an assumption that should be checked for every population PK model. Check this assumption with the ETA-QQ plots. QQ plots take the observed data and overlay it on the quantiles of a normal distribution. When the data fall along the reference line (often a 45 degree line on the QQ plot), the samples are believed to be taken from a normal distribution. I've never seen a perfect ETA-QQ plot where the ETAs are perfectly normally distributed but if there is significant [asymmetry]{.underline} in the tails of the ETA distribution, this should be cause for concern.
+
+::: panel-tabset
+#### ETA QQ
+
+```{r}
+#| eval: false
+eta1_qq <- 
+  out[!duplicated(out$ID),] %>%
+  ggplot(., aes(sample=ETA1)) + 
+  stat_qq(shape=19, size=3) + 
+  stat_qq_line(color="red", size=1, linetype="dashed") +
+  scale_y_continuous(breaks = c(-0.4, 0, 0.4), 
+                     limits = c(-0.5, 0.5)) +
+  theme_classic() +
+  labs(x="Quantiles", y="ETA V1") + theme(axis.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold",
+        hjust = 0.5)) +labs(title = "ETA V1 QQ Plot")+ theme(axis.text = element_text(colour = "black")) + theme(axis.title = element_text(size = 12),
+    plot.title = element_text(size = 14)) 
+
+print(eta1_qq)
+```
+
+#### CWRES QQ
+
+```{r}
+#| eval: false
+eta1_qq <- 
+  fit %>%
+  ggplot(., aes(sample=ETA1)) + 
+  stat_qq(shape=19, size=3) + 
+  stat_qq_line(color="red", size=1, linetype="dashed") +
+  scale_y_continuous(breaks = c(-0.4, 0, 0.4), 
+                     limits = c(-0.5, 0.5)) +
+  theme_classic() +
+  labs(x="Quantiles", y="ETA V1") + theme(axis.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold",
+        hjust = 0.5)) +labs(title = "ETA V1 QQ Plot")+ theme(axis.text = element_text(colour = "black")) + theme(axis.title = element_text(size = 12),
+    plot.title = element_text(size = 14)) 
+
+print(eta1_qq)
+```
+
+#### SIGMA QQ
+
+```{r}
+#| eval: FALSE
+eta1_qq <- 
+  out %>%
+  ggplot(., aes(sample=ETA1)) + 
+  stat_qq(shape=19, size=3) + 
+  stat_qq_line(color="red", size=1, linetype="dashed") +
+  scale_y_continuous(breaks = c(-0.4, 0, 0.4), 
+                     limits = c(-0.5, 0.5)) +
+  theme_classic() +
+  labs(x="Quantiles", y="ETA V1") + theme(axis.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold",
+        hjust = 0.5)) +labs(title = "ETA V1 QQ Plot")+ theme(axis.text = element_text(colour = "black")) + theme(axis.title = element_text(size = 12),
+    plot.title = element_text(size = 14)) 
+
+print(eta1_qq)
+```
+:::
+
+## Validation
+
+#### Boostrapping
+
+Bootstrapping is a statistical breakthrough.
+
+1.  Sample n observations with replacement from the dataset.
+2.  Fit the model.
+3.  Steps 1 and 2 are repeated many times, typically 1,000 times, to create a distribution of the model parameter estimates across the bootstrap samples.
+4.  With the distribution of the statistic's values obtained from the bootstrap samples, you can calculate measures of uncertainty such as confidence intervals or standard errors. These can provide insight into the reliability of your original statistic as an estimate for the population parameter.
+
+::: callout-note
+The key advantage of the bootstrap is that it does not require assumptions about the distribution of the data. It allows you to estimate the sampling variability and derive confidence intervals even when classical parametric methods might not be appropriate due to distributional assumptions. In essence, the bootstrap helps bridge the gap between data sample and population characteristics.
+:::
+
+#### Visual Predictive Checks (VPC)
+
+A very useful validation technique is to generate predictions from the model and compare summary measures of the model's predictions to summary measures of the observed data. Commonly, the 5th, 50th, and 95th percentiles of the observed and simulated data are compared. This method is commonly done to validate the final model, but is also very useful with the base model for identifying structural misspecification.
+
+::: callout-note
+One limitation of the VPC that is important to keep in mind, is that it does not incorporate the uncertainty of parameter estimates into the simulations.
+:::
+
+#### Prediction-corrected Visual Predictive Checks (pcVPC)
+
+Sometimes the VPC is limited by... The pcVPC can help mitigate these issues of a standard VPC by normalizing the observed and simulated variables based on the population prediction. The prediction-corrected observation is calculated by scaling the observation $Y_{ij}$ to the ratio of the median of the typical population prediction within a bin $PRED_{bin}$ and the given individual observation prediction. Consider pcVPC when you have several dose-levels in your dataset.
+
+$$
+pcY_{ij}=Y_{ij}*\frac{PRED_{bin}}{PRED_{ij}}
+$$
+
+#### Numerical Predictive Checks (NPC)
+
+#### 
+
+## BQL Methods
+
+Stuart Beal described seven methods (M1-7) for fitting mixed effects models with data that are below the limit of quantification (BLQ) [@beal2001].
+
+| Beal Method | Description                                                                                                                                                                                                                                               |
+|----------------|--------------------------------------------------------|
+| M1          | Discard BLQ data and estimate the model using remaining values as if they came from a full distribution.                                                                                                                                                  |
+| M2          | Discard BLQ data and estimate treating the remaining values as forming a "truncated" sample. The likelihood of all remaining samples is calculated conditional on the value being greater than the LLOQ.                                                  |
+| M3          | Ignore any actual values of the BLQ data and estimate by treating the sample as a whole as one in which BLQ values are censored. The likelihood of the BLQ sample assumes that the value is less than the LLOQ.                                           |
+| M4          | Estimate as in M3 but add an additional constraint that all BLQ values must be positive. The likelihood of any values is conditional on their being greater than zero with the additional constraint for the BLQ values that they are less than the LLOQ. |
+| M5          | Impute BLQ data by LLOQ/2 and estimate as if all the values were real.                                                                                                                                                                                    |
+| M6          | When measurements are taken for a given individual over time, impute as for M5 for the first BLQ measurement and discard all subsequent BLQ data.                                                                                                         |
+| M7          | Impute BLQ values as zero and estimate as if they were real.                                                                                                                                                                                              |
+
+This study by [@bergstrand2009] demonstrated how each of these methods compare in terms of mitigating parameter bias. It is an absolute must read.
+
+### Concluding thoughts
+
+An excellent introduction to most of these ideas are presented in [@mould2012a].
+
+### References

@@ -1,0 +1,78 @@
+---
+title: "Risk/Benefit Assessment"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Risk/Benefit Assessment
+
+```{r}
+library(tidyverse)
+library(mrgsolve)
+```
+
+## Conceptual
+
+Up to this point, we have assumed that the decision to move forward with the compound has been made, thus the question has been "*How* should we design the next trial?", not "*Should* we design the next trial?". This section will briefly describe some approaches toward rational (quantitative) decision making during drug development, focusing on Bayesian methods.
+
+After phase 2 study data become available, drug developers are often faced with two important questions: 1) Can we assess the probability of success (POS) of a phase 3 program incorporating both phase 2 efficacy and safety information? 2) How should we select a phase 3 dose (or doses) based on phase 2b dose-finding study data? When phase 3 studies are completed, we also face the question of whether or not the B--R profile of the proposed product meets regulatory standards for approval. A drug cannot be brought to market unless the FDA finds that there is "substantial evidence" establishing the drug as both safe and effective.
+
+To progress through the development pathway, a medicine must demonstrate that its benefits outweigh its risks. This assessment is a complex task that depends on factors such as disease prevalence, prognosis for patients, severity of safety signals, and the benefit‐risk (BR) profile of existing therapies, among others.\
+A range of statistical techniques and visual tools for the separate analysis of the efficacy and safety profiles of new drugs is available. However, the same cannot be said regarding joint quantitative BR assessments. In general, sponsors and regulators agree that improving transparency, reproducibility, and communication of BR assessments requires a structured approach, focusing on key efficacy and safety outcomes. Recent efforts have attempted to move beyond the structuring step to a more quantitative framework that allows sponsors and regulators to gain further insight into specific aspects of a drug's BR profile. Techniques such as multicriteria decision analysis (MCDA), decision contours, or weighted BR scores have proved useful tools for quantitative BR assessments. A comprehensive review of quantitative approaches for BR evaluations can be found in Mt‐Isa et al.
+
+An additional challenge of any BR assessment is the fact that exposure to an investigational drug creates the potential for efficacy and safety outcomes to be connected at the subject level. In this scenario, analysing efficacy and safety responses separately could lead to misleading results. Often, these outcomes will be of a different nature, for example, a continuous efficacy measure and a binary safety event. Approaches for joint modelling have been developed in the literature, notably when linking continuous and longitudinal or continuous and time‐to‐event data.
+
+In the past, the decision to move to phase III and/or to select a phase III dose or doses were often made based on the subjective and qualitative assessment of efficacy and safety profiles. Noticeably in the past, some phase III programs failed because of unfavorable efficacy and safety profiles and/or the selected phase III dose(s) needed to be modified in phase III trials, resulting in inquiries from regulators regarding the integrity and validity of the phase III study results. The need to utilize quantitative approaches to assess the efficacy and safety profiles that will inform POS of phase III clinical development programs and to assist in phase III dose selection has never been greater. In recent years, researchers have used a decision theoretic framework via the clinical utility index (CUI) to assess efficacy and safety profiles and to assist in the selection of phase III dose. CUI combines both the efficacy and safety data and provides an integrated measurement of risks and benefits. However, its limitation lies in the fact that the choice of CUI and the relative weights for efficacy and safety endpoints can be viewed as somewhat subjective, and that the results and conclusion may differ based on different CUIs and/or its relative weights for the endpoints. Moreover, the intricate relationship between efficacy and safety profiles is not explored and incorporated into the CUI, further limiting the utility of CUIs.
+
+#### Benefit-Risk Assessment
+
+For one efficacy endpoint only, let $\theta$ denote the treatment effect (i.e., test drug vs. placebo or test drug vs. an active comparator) and $\delta$ denote a clinical meaningful threshold. Thus, if $\theta$ \>\>$\delta$, substantial evidence of efficacy has been achieved. Using Bayesian methods, the probability of technical success (POTS) is defined as the posterior probability that the treatment effect, $\theta$, is larger than $\delta$, given the observed data; that is:
+
+$$
+POTS = Pr(\theta>\delta|y)
+$$
+
+where $y$ represents the data from the clinical trial. POTS depends only on completed clinical trial data and can be used as a metric for the assessment of substantial evidence of efficacy. The probability of success (POS) can be defined as the expected probability of rejecting the null hypothesis over the posterior distribution of $\theta$. The above framework also provides a useful tool for the selection of an optimal dose or doses for the phase 3 trial(s). Presumably, once POC is achieved based on high POTS in one or more test drug doses, the optimal dose or doses that correspond to the highest POTS could be chosen.
+
+What is very attractive about Bayesian statistics in this setting is that we can extend this framework to multiple efficacy and safety outcomes, with **no multiplicity issues**. Thus, our POTS could be...
+
+$$
+POTS = Pr(\theta_{e1}>\delta_{e1}, \theta_{e2}>\delta_{e2}, \theta_{s1}>\delta_{s1}, \theta_{s2}>\delta_{s2})
+$$
+
+In a clinical trial, it is often the case that measures of benefit and risk are different in the nature of their sampling distribution. For example, the primary measure of efficacy may vary on a continuous scale, whereas a key safety risk may be binary, representing the occurrence or not of an adverse event of special interest. These multiple measurements on an individual subject can be seen as a multivariate response variable. Two approaches that are very interesting to me both use joint modelling of multivariate data where the components of the response vector can differ in the nature of their sampling distribution. The first is through shared random effects (or latent variables), a special type of **generalised linear mixed model** (GLMM), and the second is through **copulas**, which build multivariate distributions by separating the dependence structure from the marginal distributions.. Although a key property of the proposed approach is its quantitative and objective nature, it also allows for subjective judgement to be incorporated using clinical thresholds. Using information from physicians, patients, or competitor data, regions of interest for the joint posterior distribution of parameter values can be defined to assess the probability that a new drug has the desirable BR profile, similar to the probability of technical success (POTS).
+
+There are several advantages to the joint modeling framework for efficacy and safety evaluation. Joint models are particularly useful when: 1) data may be missing not at random; 2) efficacy and safety processes are interrelated by disease/drug exposure. There is a vast body of researches on joint modeling approaches, but joint models be broadly classified as selection models or mixture models. The most popular way to construct a joint model is with a *shared random effects* parameterization.
+
+#### Clinical Trial Decision-making Model
+
+```{mermaid}
+flowchart TD
+A[Market size] --> G[Go/No-go<br>decision]
+B[Efficacy/safety<br>signal] --> G
+C[Regulatory<br>incentives] --> G
+D[Clinical<br>stage<br>costs] --> G
+E[Manufacturing<br>costs] --> G
+F[Profit<br>potential] --> G
+```
+
+## Technical
+
+In progress.
+
+**Take-home:** Deciding whether or not to pursue further development of a drug (i.e., "Go") can be a billion dollar decision. Bayesian joint-modeling methods (i.e., GLMM, copulas) offer an attractive approach to estimating the benefit-risk ratio from a compound of interest based on phase II data. The basic idea is to model efficacy and safety data as a multivariate response, allowing for potential dependencies at the individual level, and computing the probability of the drug having a better efficacy or safety (or both) profile than the standard of care or reference drug. Bayesian methods offer many advantages to clinical trial data analysis.
+
+# 
+
+### References

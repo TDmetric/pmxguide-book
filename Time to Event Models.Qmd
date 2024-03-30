@@ -1,0 +1,635 @@
+---
+title: "Time-to-Event Models"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+bibliography: references.bib
+---
+
+# Time-to-Event Models
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+library(tidyverse)
+library(mrgsolve)
+```
+
+## Overview
+
+Time-to-event (TTE) data are common in clinical pharmacology. TTE data is unique because the outcome of interest is not only whether or not an event occurred, but also [when]{.underline} that event occurred. Traditional regression techniques (e.g., linear or logistic regression) are not applicable for TTE analysis because they can not handle censoring. Censoring refers to a special case of missing data when the event of interest is not observed or the event time is not precisely known. When censoring is present and ignored, the model's parameter estimates and standard errors will be biased and artificially low.
+
+### Considerations
+
+If you're presented with TTE data, spend some time to consider each of the following points in detail.
+
+1.  **Event**:
+    -   What is the event of interest (e.g., death, adverse event, dropout)?
+
+    -   Can the event happen only once (e.g., death) or are repeated events possible (e.g., bone fractures, missed doses)?
+
+    -   Can other events force the event of interest to be censored (more on this later)?
+2.  **Origin**:
+    -   When is time 0 (e.g., study day 1, day after transplant, birth, etc).
+3.  **Scale**:
+    -   What is the time scale of the study? Day of study, age of the patient?
+4.  **Censoring**:
+    -   [Left:]{.underline} The event time is known, but the time origin is not (e.g., the day that the patient contracted the infection is not precisely known) meaning the time to event cannot be precisely known.
+
+    -   [Interval:]{.underline} The event is known to have occurred, but the exact event time is only known to have occurred between two time points. This is very common in clinical research (e.g., the exact time of a patient's new tumor lesion is unknown, but known to have occurred between the last and current clinic visit).
+
+    -   [Right:]{.underline} The event time is unknown because the event has yet to happen. The event is often unobserved because the study ends before the patient experiences the event (so called "administrative censoring") or the event has yet to happen (or the patient experiences an event that makes observation of the event of interest impossible).
+
+::: callout-important
+Uninformative censoring is a standard, often taken for granted, assumption of TTE analysis. We assume the distribution of event times for censored patients is exactly the same as for uncensored patients. In other words, the fact that a patient's observation is censored is completely unrelated to their event time. The data are NOT MNAR.
+:::
+
+#### TTE Concepts
+
+Four concepts are critical to understanding TTE analysis. The Survival function, Probability Density Function (or Cumulative Incidence Function), hazard, and cumulative hazard. These are defined below:
+
+-   **Survival function**, $S(t)$: the probability that an individual will survive beyond time $Pr(T>t)$ .
+
+    -   I like to think of the survival function as standing at the starting line with a telescope and looking out over the time axis to see "What is my probability of making it to time t without experiencing the event?"
+
+-   **Probability density function**, $F(t)$, or Cumulative Incidence Function, $R(t)$: the probability an individual will have a survival time less than or equal to $Pr(T<=t)$ .
+
+-   **Hazard Function**, $h(t)$: the instantaneous potential of experiencing an event at time $t$ , conditional on having survived to that time.
+
+    -   I like to conceptualize the hazard function as someone walking along the time axis with a microscope asking, "What is my risk of experiencing the event as I take this next step (given that I have made it this far)?".
+
+-   **Cumulative Hazard Function**, $H(t)$: the integral of the hazard function from time 0 to time $t$ . This is equal to the area under the $h(t)$ curve between time 0 and time t.
+
+If one of these functions is known, the others may be readily calculated using the following formulas:
+
+$$
+S(t) = 1 - F(t)
+$$
+
+$$
+h(t) = f(t)/S(t)
+$$
+
+$$
+H(t) = -log[S(t)]
+$$
+
+$$
+S(t)=e^{-H(t)}
+$$
+
+These quantities can be used to answer research questions of interest such as:
+
+1.  What proportion of individuals will remain free of the event after a certain time?
+
+2.  What proportion of individuals will have the event after a certain time?
+
+3.  What is the risk of the event at a particular point in time, among those who have survived until that point?
+
+Many students struggle to understand these concepts until they learn that the hazard is perfectly analogous to the elimination rate constant $k_{el}$ in pharmacokinetics. The hazard is simply the elimination rate of "event-free" patients. Once this concept is grasped, TTE analysis begins to click. See this paper by Nick Holford for a great explanation. [@holford2013]
+
+#### Hazard ratios
+
+The quantity of interest from a Cox regression model is a hazard ratio (HR). The HR represents the ratio of hazards between two groups at any particular point in time. The HR is interpreted as the instantaneous rate of occurrence of the event of interest in those who are still at risk for the event. It is not a risk, though it is commonly interpreted as such. If you have a regression parameter β (from column estimate in our coxph) then HR = exp(β). A HR \< 1 indicates reduced hazard of death whereas a HR \> 1 indicates an increased hazard of death. So our HR = 0.59 implies that around 0.6 times as many females are dying as males, at any given time.
+
+There are many ways to describe or model TTE data. There are nonparametric, semi-parametric, and parametric models. See the table below for the key models, equations, and key points for each. There are many more nonparametric (life-tables, Nelson-Aalen estimator) and parametric (log-normal, log-logistic) ways to model TTE data than the ones presented below. These are just the ones I believe are absolutely essential to understand and commit to memory.
+
++--------------------------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| **Nonparametric**        |                                    | **Notes**                                                                                                                                                                                                                             |
++--------------------------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Kaplan-Meier             |                                    | -   Makes no assumptions about the data distribution.                                                                                                                                                                                 |
+|                          |                                    |                                                                                                                                                                                                                                       |
+|                          |                                    | -   A good way to descriptively plot TTE data.                                                                                                                                                                                        |
+|                          |                                    |                                                                                                                                                                                                                                       |
+|                          |                                    | -   Can make adjustments for non-continuous covariates, but not continuous ones. Often continuous variables will be dichotomized into tertiles or quartiles for exploratory purposes.                                                 |
++--------------------------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| **Semi-parametric**      |                                    |                                                                                                                                                                                                                                       |
++--------------------------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Cox proportional hazards | $$                                 | -   Makes no assumption about the distribution of baseline hazard.                                                                                                                                                                    |
+|                          | h(t) = h_0*e^{β_1*cov_1*β_n*cov_n} |                                                                                                                                                                                                                                       |
+|                          | $$                                 | -   Useful for comparing relative risk between covariate groups.                                                                                                                                                                      |
+|                          |                                    |                                                                                                                                                                                                                                       |
+|                          |                                    | -   Unlike Kaplan-Meier, continuous covariates can be used                                                                                                                                                                            |
+|                          |                                    |                                                                                                                                                                                                                                       |
+|                          |                                    | -   Because the hazard function is not specified, we cannot make individual predictions for the TTE outcome.                                                                                                                          |
+|                          |                                    |                                                                                                                                                                                                                                       |
+|                          |                                    | -   Parameters are estimated by comparing event distributions of patients with covariate=1 with the event distribution of patients with covariate=0. Center ($Cov_i - mean(Cov_i))$ your continuous covariates to aid interpretation! |
++--------------------------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| **Parametric**           |                                    |                                                                                                                                                                                                                                       |
++--------------------------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Exponential              | $$                                 | -   The simplest parametric survival model.                                                                                                                                                                                           |
+|                          | h(t)=λ                             |                                                                                                                                                                                                                                       |
+|                          | $$                                 | -   Hazard is constant through time.                                                                                                                                                                                                  |
+|                          |                                    |                                                                                                                                                                                                                                       |
+|                          |                                    | -   Produces straight-line KM curve on the log-linear scale.                                                                                                                                                                          |
++--------------------------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Weibull                  | $$                                 | -   Can be used to estimate a hazard that increases or decreases over time.                                                                                                                                                           |
+|                          | h(t)=λ*γ*(λ*t)^{γ-1}               |                                                                                                                                                                                                                                       |
+|                          | $$                                 | -   Increasing hazard when $λ>1$ and decreasing hazard when $λ<1$                                                                                                                                                                     |
+|                          |                                    |                                                                                                                                                                                                                                       |
+|                          |                                    | -   Reduces to exponential hazard model when $λ=1$                                                                                                                                                                                    |
++--------------------------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Gompertz                 | $$                                 | -   Exponentially increasing hazard                                                                                                                                                                                                   |
+|                          | h(t)=λ*e^{γ*t}                     |                                                                                                                                                                                                                                       |
+|                          | $$                                 |                                                                                                                                                                                                                                       |
++--------------------------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Log-logistic             |                                    | -   Increasing then exponentially decreasing hazard.                                                                                                                                                                                  |
++--------------------------+------------------------------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+There are many more ways to describe or model TTE data. Additional nonparametric approaches include life-tables and the Nelson-Aalen estimator while additional parametric approaches include the log-normal and generalized gamma distribution. Additionally, a spline function may be used to model the baseline hazard allowing for complicated functions (increasing, then decreasing, then increasing again) to be fit to the data based on the number and location of knots used.
+
+::: panel-tabset
+#### **Non-parametric models**
+
+-   Require no assumption about the baseline hazard function.
+-   Good for exploratory data analysis and plotting.
+
+#### **Semi-parametric models**
+
+-   Cox PH model may be the most commonly used TTE model. It is useful for comparing the hazards between covariate groups through estimation of hazard ratios.
+-   Does not require specification of the baseline hazard.
+-   Check that the PH assumption is met!
+
+#### **Parametric models**
+
+-   Require an assumption about the distribution of the baseline hazard.
+
+-   Distributions such as Weibull and Gompertz allow for the hazard to change with time.
+
+-   Can make individual predictions for individual event times based on the model.
+
+-   In pharmacometrics, we love to validate models with simulation (visual predictive checks). We can actually do this with parametric models.
+:::
+
+::: callout-important
+**Proportional Hazards Assumption:** We often hear of the "Cox Proportional Hazards" model, but any of the parametric models may be a "proportional hazards" (PH) model. Basically, the PH assumption is that there are no interactions between covariate effects and time in the model. For example, say a study is undertaken to determine the risk for acute graft versus host disease (aGVHD) after bone marrow transplant. Follow up is for 100 days and a Cox PH model is fit to the data with the goal of estimating the relative risk between patients who were a human leukocyte antigen (HLA) match vs those who were a HLA mismatch. HLA mismatch patients were estimated to have a relative hazard for aGVHD two times as high as those who were a HLA match. The PH assumption is that HLA mismatch patients are at twice as high of risk for aGVHD relative to HLA match patients through the entire study period (100 days). The PH assumption is a strong one and deserves checking every time a PH model is used.
+:::
+
+#### Choosing the parametric function
+
+*How do I choose which parametric model to use?*
+
+The choice of the appropriate parametric model should be based on the study hypothesis, domain knowledge, and fit to the data. The data may be used to assess whether the specified form appears to fit the data, but these data-driven methods should complement, not replace, hypothesis-driven selections. A relevant quote from Frank Harrell is, "Use of the data to guide the modeling is almost as dangerous as not." A great tutorial article aimed towards pharmacometricians for these models has been published. I highly recommend it. [@findinga].
+
+### Parametric hazard distributions
+
+#### Exponential
+
+The constant hazard function is the simplest parametric hazard function. The survival function is described by an exponential function of $-\lambda*time$ and the probability density function of the events time shows an exponential distribution. The constant hazard function is more restrictive than the semi-parametric Cox proportional hazard function because it assumes a constant (baseline) hazard function, whereas the Cox model only assumes the proportionality of hazards when (undefined) hazard functions do not need to be constant as long as they are proportional.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+exponential <- '
+$PROB exponential TTE model
+
+$PARAM @annotated
+LAM        : 0.0206     : rate parameter 1/LAM = mean event time
+del        : 1E-16      : prevent ODE evaluation at zero
+
+$CMT  @annotated
+HAZ     : hazard
+
+$ODE
+dxdt_HAZ = LAM;
+
+$TABLE
+double CHAZ = HAZ;
+double SUR = exp(-CHAZ);
+double HAZNOW = LAM;
+  
+$CAPTURE @annotated
+CHAZ   : cumulative hazard
+SUR    : survival probability
+HAZNOW : instantaneous hazard
+'
+
+exponential <- mcode('exponential', exponential)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+exponential %>%
+  ev(data.frame(ID=1)) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(HAZNOW+SUR~time)
+```
+
+#### Weibull
+
+The Weibull model is another popular parametric model with increased flexibility relative to the exponential model. It uses two parameters, a rate and shape, to characterize both increasing and decreasing hazards over time. If the shape parameter does not vary with covariates, both the accelerated failure time and proportional hazard assumptions hold, which is a unique property of this model. The Weibull model is an attractive model for intuitive interpretation regarding the hazard ratio between populations and a treatment or covariate effect on the survival time.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+weibull <- '
+$PROB Weibull model
+
+$PARAM @annotated
+LAM     : 0.0206      : lambda - rate parameter
+GAM     : 1.99        : gamma - shape parameter
+del     : 1E-16    : 
+
+$CMT  @annotated
+HAZ     : hazard
+
+$ODE
+dxdt_HAZ = LAM*GAM*pow((LAM*(SOLVERTIME+del)), (GAM-1));
+
+$TABLE
+double CHAZ = HAZ;
+double SUR = exp(-CHAZ);
+double HAZNOW = LAM*GAM*pow((LAM*(TIME+del)), (GAM-1));
+
+$CAPTURE @annotated
+CHAZ   : cumulative hazard
+SUR    : survival probability
+HAZNOW : instantaneous hazard
+LAM    : lambda - rate parameter
+GAM    : gamma - shape parameter
+'
+
+weibull <- mcode('weibull', weibull)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+weibull %>%
+  ev(data.frame(ID=1)) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(HAZNOW+SUR~time)
+```
+
+#### Gompertz hazard distribution
+
+The Gompertz model is a two-parameter proportional hazard function. When $\gamma$ \< 0, the hazard decreases over time, whereas $\gamma$ \>0 characterizes an increasing hazard with time. The Gompertz model reduces to the exponential model for $\gamma$ = 0.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+gompertz <- '
+$PROB gompertz model
+
+$PARAM @annotated
+LAM     : 0.0206      : lambda - rate parameter
+GAM     : 0.1        : gamma - shape parameter
+del     : 1E-16    : 
+
+$CMT  @annotated
+HAZ     : hazard
+
+$ODE
+dxdt_HAZ = LAM*exp(GAM*(SOLVERTIME+del));
+
+$TABLE
+double CHAZ = HAZ;
+double SUR = exp(-CHAZ);
+double HAZNOW = LAM*GAM*exp(GAM*(TIME+del));
+
+$CAPTURE @annotated
+CHAZ   : cumulative hazard
+SUR    : survival probability
+HAZNOW : instantaneous hazard
+LAM    : lambda - rate parameter
+GAM    : gamma - shape parameter
+'
+gompertz <- mcode('gompertz', gompertz)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+gompertz %>%
+  ev(data.frame(ID=1)) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(HAZNOW+SUR~time)
+```
+
+#### Log-logistic
+
+This log-logistic model is one of the few parametric hazard distributions that can capture an increasing followed by decreasing hazard functions. The log-logistic distribution allows the hazard to increase for a shape parameter γ \> 1, while it decreases over time for shape parameter γ ≤ 1.This is great, but the parameters of the distribution are hard to interpret, which can make coming up with initial estimates for parameters tricky (to me, a least). Similar to the Weibull model, the log-logistic model has an alternative parameterization. An advantage of the log-logistic model over the log-normal model is that is can be solved analytically. If the accelerated failure time assumption holds, the log-logistic distribution is a proportional odds model, that is, the odds ratio is constant over time. The event times approximate a log-logistic distribution.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+ll <- '
+$PROB log-logistic model
+
+$PARAM @annotated
+LAM     : 0.05      : lambda - rate parameter
+GAM     : 0.75       : gamma - shape parameter
+del     : 1E-16    : 
+
+$CMT  @annotated
+HAZ     : hazard
+
+$ODE
+dxdt_HAZ = (LAM*GAM*pow((LAM*SOLVERTIME+del), (GAM-1))) / (1 + pow(LAM*(SOLVERTIME+del), GAM));
+
+$TABLE
+double CHAZ = HAZ;
+double SUR = exp(-CHAZ);
+double HAZNOW = (LAM*GAM*pow((LAM*TIME+del), (GAM-1))) / (1 + pow(LAM*(TIME+del), GAM));
+
+$CAPTURE @annotated
+CHAZ   : cumulative hazard
+SUR    : survival probability
+HAZNOW : instantaneous hazard
+LAM    : lambda - rate parameter
+GAM    : gamma - shape parameter
+'
+
+ll <- mcode('ll', ll)
+```
+
+```{r}
+ll %>%
+  ev(data.frame(ID=1)) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(HAZNOW+SUR~time)
+```
+
+#### Generalized Gamma
+
+TBD.
+
+#### NONMEM
+
+Below are some example NONMEM code for fitting common parametric survival models.
+
+::: panel-tabset
+#### Exponential
+
+``` fortran
+$PROB exponential hazard model
+$INPUT C ID TIME DV DVID MDV
+$DATA data.csv IGNORE=C
+$SUBR ADVAN=6 TOL=3
+
+$MODEL
+COMP=(CUMHAZ)
+
+$PK
+IF (NEWIND.LE.1) THEN ; Initialize
+  SURLAST=1
+  CUMLAST=0 
+ENDIF
+
+BASHAZ = THETA(1)
+HAZI = BASHAZ  ; Baseline hazard
+
+$DES
+DADT(1) = HAZI ; h(t)
+
+$ERROR
+CUMHAZ=A(1) ; Cumulative hazard
+SUR=EXP(-CUMHAZ)
+
+IF (DVID.EQ.2.AND.DV.EQ.0) THEN ; event observation
+  Y = EXP(-CUMHAZ)
+ENDIF
+
+IF (DV.EQ.1) THEN
+  HAZARD = HAZI
+  Y = SUR*HAZARD
+ENDIF
+
+$THETA
+(0, 0.01)  ; baseline hazard
+
+$ESTIM MAX=9990 NSIG=2 METHOD=COND LAPLACE LIKE 
+
+$TAB ID TIME CIPRED BASHAZ HAZI ONEHEADER NOPRINT FILE=EXPONENTIAL.tab
+```
+
+#### Weibull
+
+``` fortran
+$PROB weibull model
+$INPUT C ID TIME DV DVID MDV
+$DATA data.csv IGNORE=C
+$SUBR ADVAN=6 TOL=1
+
+$MODEL
+COMP=(CUMHAZ)
+
+$PK
+IF (NEWIND.LE.1) THEN ; Initialize
+  SURLAST=1
+  CUMLAST=0 
+ENDIF
+
+DEL=1E-15 ; prevent evaluation at time=0
+
+LAM = THETA(1)
+GAM = THETA(2) ; gamma
+
+$DES
+DADT(1) = LAM*GAM*(LAM*(T+del))**(GAM-1) ; h(t)
+
+$ERROR
+CUMHAZ=A(1) ; Cumulative hazard
+SUR=EXP(-CUMHAZ)
+
+IF (DVID.EQ.2.AND.DV.EQ.0) THEN ; event observation
+  Y = EXP(-CUMHAZ)
+ENDIF
+
+IF (DV.EQ.1) THEN
+  HAZARD = LAM*GAM*(LAM*(SOLVERTIME+del))**(GAM-1)
+  Y = SUR*HAZARD
+ENDIF
+
+$THETA
+(0.00365)    
+(0.75)     
+
+$ESTIM MAX=9990 NSIG=2 METHOD=COND LAPLACE LIKE
+
+$TAB ID TIME CIPRED PRED LAM GAM ONEHEADER NOPRINT FILE=WEIBULL.tab
+```
+
+#### Gompertz
+
+``` fortran
+$PROB gompertz model
+$INPUT C ID TIME DV DVID MDV
+$DATA data.csv IGNORE=C
+$SUBR ADVAN=6 TOL=1
+
+$MODEL
+COMP=(CUMHAZ)
+
+$PK
+IF (NEWIND.LE.1) THEN ; Initialize
+  SURLAST=1
+  CUMLAST=0 
+ENDIF
+
+LAM = THETA(1)
+GAM = THETA(2)  
+DEL=1E-15
+
+$DES
+DADT(1) = HAZI*EXP(GAM*(T + DEL))
+
+$ERROR
+CUMHAZ=A(1) ; Cumulative hazard
+SUR=EXP(-CUMHAZ)
+
+IF (DVID.EQ.2.AND.DV.EQ.0) THEN 
+  Y = EXP(-CUMHAZ)
+ENDIF
+
+IF (DV.EQ.1) THEN
+  HAZARD = HAZI*EXP(BETA*(TIME + DEL))
+  Y = SUR*HAZARD
+ENDIF
+
+$THETA
+(0, 0.0005)  ; LAM
+(0.001)      ; GAM
+
+$ESTIM MAX=9990 NSIG=2 METHOD=COND LAPLACE LIKE 
+
+$TAB ID TIME CIPRED CWRES BASHAZ LAM GAM ONEHEADER NOPRINT FILE=GOMPERTZ.tab
+```
+
+### Log-logistic
+
+```{fortran}
+
+
+
+
+
+```
+:::
+
+#### Assessing TTE Model Fit
+
+**Martingale Residuals**
+
+The distance between predicted instantaneous risk of event at time Ti, and the observed event indicator.
+
+$$
+Residual_{Martingale}=q - Residual_{Cox Snell}
+$$
+
+If the martingale residuals plotted against the longitudinal outcome prediction, they are expected to be close to 0 if the model is reasonably fit. Martingale residuals close to 1 correspond to individuals experiencing the event for whom the model did not succeed in predicting a high risk event. Martingale residuals 𝑟𝑀𝑖rMi can be defined as 𝑟𝑀𝑖=𝛿𝑖−𝑟𝐶𝑖rMi=δi−rCi where 𝛿𝑖δi is a switch taking the value 0 if observation is censored and 1 if observation 𝑖i is uncensored. Martingale residuals take a value between \[1,−∞\]\[1,−∞\] for uncensored observations and \[0,−∞\]\[0,−∞\] for censored observations. It is often useful to overlay a LOESS curve over this plot as they can be noisy in plots with lots of observations.
+
+**Deviance Residuals**
+
+A deviance residual, rDi=sgn(rMi)−2rMi+δilog⁡(δi−rMi) where the sgn takes a value of 1 for positive martingale residuals and -1 for a negative martingale residual. A residual of high absolute value is indicative of an outlier. A positively valued deviance residual is indicative of an observation whereby the event occurred sooner than predicted; the converse is true for negatively valued residual. Unlike Martingale residuals, deviance residuals are mean centered around 0, making them significantly easier to interpret than Martingale residuals when looking for outliers. One application of deviance residuals is to jackknife the dataset with just one parameter modeled and test for significant difference in parameter coefficients as each observation are removed. A significant change would indicate a highly influential observation.
+
+**Schoenfield Residuals**
+
+Schoenfeld residuals are slightly different in that each residual corresponds to a variable, not an observation. The use of Schoenfeld residuals is to test the proportional hazards assumption. Grambsch and Thernau (1994) proposed that scaled Schoenfeld residuals may be more useful. By plotting event time against the Schoenfeld residual for each variable, the variables adherence to the PH assumption can be assessed by fitting a LOESS curve to the plot. A straight line passing through a residual value of 0 with gradient 0 indicates that the variable satisfies the PH assumption and therefore does not depend on time. Schoenfeld residuals can also be assessed through a hypothesis test.
+
+### Simulating Time-to-Event
+
+Simulating discrete events in continuous time is challenging. The best approach seems to be to generate a random number form a uniform distribution between 0 and 1 for each individual in the dataset and when the survival probability drops below the individual's random number, the individual experiences an event.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+# simulating time to event
+exponential <- '
+$PROB exponential TTE model
+$PLUGIN Rcpp
+
+$PARAM @annotated
+LAM        : 0.0206     : rate parameter 1/LAM = mean event time
+del        : 1E-16      : prevent ODE evaluation at zero
+
+$CMT  @annotated
+HAZ     : hazard
+
+$ODE
+dxdt_HAZ = LAM;
+
+$TABLE
+if(NEWIND <=1) double ran = R::runif(0,1);
+if(NEWIND <=1) int EVENT=0;
+
+double CHAZ = HAZ;
+double SUR = exp(-CHAZ);
+double HAZNOW = LAM;
+
+if(TIME>0) {
+  if((ran >= SUR)) EVENT = 1;
+}
+  
+$CAPTURE @annotated
+CHAZ   : cumulative hazard
+SUR    : survival probability
+HAZNOW : instantaneous hazard
+EVENT  : event
+'
+
+exponential <- mcode('exponential', exponential)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(1234)
+exponential %>%
+  ev(data.frame(ID=1:1000)) %>%
+  mrgsim(end=200, delta=1) %>%
+  as.data.frame() %>%
+  group_by(ID) %>%
+  mutate(csev = cumsum(EVENT)) %>%
+  filter(csev<2) %>%
+  summarise(m = max(time)) %>%
+  ggplot(., aes(m)) +
+  geom_histogram(fill='white', color='black') +
+  theme_classic() +
+  labs(x = 'Event time', y='# of patients')
+```
+
+### Accelerated Failure Time
+
+The underlying assumption of accelerated failure time (AFT) models is that the covariates act to "stretch out" or "contract the individuals survival time. Formally, they act multplicatively with respect to the survival time and the hazard. I read the best analogy for this type of model in Pete Bonate's Pharmacokinetic/Pharmacodynamic Modeling & Simulation, who cited another author. Here is a slightly paraphrased (from memory) version:"It is often said that dogs age seven times faster than humans, so a 5-year old dog is like a 35 year-old human. If we were fitting an AFT model to a dataset with species as a covariate (0=human; 1=dog), the estimate (acceleration factor) would be \~7. Under this paradigm, dogs can be seen as"accelerating" along the time axis (life) seven times faster than humans." To fit an exponential AFT model, this amounts to fitting a regression model to the log-transformed event time.
+
+$$
+S(t) = exp(-\lambda*t)
+$$
+
+$$
+log(t) = -\lambda*t
+$$
+
+Where $\lambda$ is the "acceleration factor". Interpretation of binary covariates (i.e., dog versus human) is straightforward, but continuous predictors are tricky.
+
+### Recurrent Events
+
+When the event of interest is death, this is a terminal event, thus patients can only experience the event once. However, there are situations, such as adverse events, new lesions, bone fractures, where patients may experience the event repeatedly. This type of data is referred to as "recurrent event". Recurrent event analyses typically fall into one of two categories. The first being situations where the order of events is not important (e.g., missed doses). The second is where the order of events is important, typically because each subsequent event is assumed to be more serious than the previous (e.g., disease relapse). When the order of events is important, different stratified Cox models (conditional models and marginal models) or parametric model containing frailty may be used.
+
+### Competing Risks
+
+Sometimes events may censor the event of interest. For example, if we are interested in death due to disease relapse after bone marrow transplant and patients may also die due to non-relapse related mortality events (e.g., infection, organ failure, etc), these events will censor the event we are really interested in (relapse related mortality). There are several ways to handle such data types, one of which is with the use of multistate models, which is discussed in a separate section.
+
+### References

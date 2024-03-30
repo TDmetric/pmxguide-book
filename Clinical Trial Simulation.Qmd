@@ -1,0 +1,684 @@
+---
+title: "Clinical Trial Simulation"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+bibliography: references.bib
+---
+
+# Clinical Trial Simulation
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+library(tidyverse)
+library(mrgsolve)
+```
+
+Conduct and completion of a successful clinical trial is an expensive and time-consuming initiative. It requires thoughtful planning and execution based on study conduct details that need to be pre-planned and stated in the protocol. Clinical trial simulation (CTS) may be used to answer broad scale questions such as: 1) *How* should we design the next trial?; 2) *Is* this trial likely to be successful? To me, this seems to be where everything comes together. We want to leverage all available data and models to rigorously assess the feasibility of conducting a successful clinical trial. When clinical trials are designed, it is planned that all patients will follow the protocol as written. Trial execution models broadly encompass the elements of the study to be conducted including treatments, doses, frequency, timing of sample collection, scheduled follow up visits, procedures for protocol deviations, etc.
+
+### Patient recruitment
+
+Patient recruitment issues may be considered outside of the realm of pharmacometrics, but in some cases, this process may be warranted in clinical trial simulations to provide reasonable estimations of trial duration or costs.
+
+Simulation of patient recruitment may be warranted in clinical trial simulation provide reasonable estimates of trial duration and costs, thereby facilitating decisions about whether or not to conduct the trial.
+
+In this example, the patient recruitment process is based on a Poisson distribution in which the number of patients recruited to the study each month follows a Poisson distribution. For this hypothetical study the goal is to recruit 50 patients.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+recruitment <- '
+$PLUGIN Rcpp
+
+$PARAM @annotated
+TVLAM : 5       : average patients per month
+
+$MAIN
+if(NEWIND <= 1) double TOTAL = 0;
+
+$TABLE
+double PATIENTS = R::rpois(TVLAM);
+TOTAL = TOTAL + PATIENTS;
+
+$CAPTURE PATIENTS TOTAL
+'
+recruitment <- mcode('recruitment', recruitment)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+recruitment %>%
+  ev(data.frame(ID=1:1000, cmt=0)) %>%
+  mrgsim(end=15, delta=1) %>%
+  as.data.frame() %>%
+  group_by(ID) %>%
+  filter(TOTAL<51) %>%
+  summarise(m = max(time)) %>%
+  ggplot(., aes(m)) +
+  geom_histogram() +
+  theme_classic() +
+  labs(x = 'Recruitment period (months)', y = 'Trial replicates')
+```
+
+### Dropout
+
+Patient dropout is an important aspect of clinical trial simulations. There are situations where this process is random (MCAR), dependent on observable covariates (MAR), and some where the patient dropped out of the trial because of disease progression, toxicity, etc. In these situations, the dropout is said to be informative and special care must be taken in the analysis of the data. See the section on missing data if you are unfamiliar with missing data patterns (e.g., MCAR, MAR, MNAR).
+
+#### Random Dropout
+
+A number of mechanisms may be used to simulate random dropout. To simulate a given dropout rate, for subsequent visits, a random draw from a uniform distribution may be made on each visit and if the value is less than the conditional probability for dropout at that visit, the patient is dropped from the trial. The conditional probability of the patient dropping out at the third visit, given that they did not dropout at the second visit could be:
+
+$$
+Pr(dropout~at~visit~3|no~dropout~at~visit~2) = \frac{Pr(dropout_3) - Pr(dropout_2)}{1-Pr(dropout_2)}
+$$
+
+```{r}
+
+```
+
+Another method to simulate random dropout is to simulate from an exponential time-to-event model. The Exponential model corresponds to a constant dropout rate, with a mean time in study of $\frac{1}{\lambda}$ .
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+rdropout <- '
+$PROB exponential TTE model for random dropout
+
+$PARAM @annotated
+LAM        : 0.001     : rate parameter; mean time in study=1/lambda
+del        : 1E-16      : prevent ODE evaluation at zero
+
+$CMT  @annotated
+DHAZ     : dropout hazard
+
+$ODE
+dxdt_DHAZ = LAM;
+
+$TABLE
+double CDHAZ = DHAZ;
+double NODROP = exp(-CDHAZ);
+  
+$CAPTURE @annotated
+CDHAZ   : cumulative dropout hazard
+NODROP    : Probability of no dropout
+'
+
+rdropout <- mcode('rdropout', rdropout)
+```
+
+#### Non-random dropout (MAR)
+
+Sometimes the dropout is related to observed patient characteristics, such as sex, age, or treatment history. One way to simulate this type of dropout pattern is with logistic regression. The probability of patient dropout conditional on their covariate values, is estiamted and then a random draw is made from a uniform distribution. If the random draw is less than the probability of dropout, the patient is dropped; otherwise the patient remains in the study.
+
+In this example, older patients are less likely to complete the trial (more likely to dropout).
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+mar_dropout <- '
+$PLUGIN Rcpp
+
+$PARAM @annotated
+TVDROP  :  -3   : typical value of dropout (logit scale)
+TVAGE   : 50    : tyipcal age
+AEFF    : 0.1   : Age effect on dropout (logit scale)
+
+$OMEGA @annotated
+eAGE : 0.05 : random effect to create lognormal dist for age
+
+$MAIN @annotated
+double AGE = TVAGE*exp(eAGE);
+double logit = TVDROP + AEFF*(AGE/50);
+double prob = exp(logit)/(1 + exp(logit)); 
+
+if(NEWIND <=1 || TIME==0) {  
+  int drop = 0;
+  int cudrop = 0;
+}
+
+$TABLE
+double ran = R::runif(0, 1);
+
+if(ran<prob) drop=1;
+
+cudrop = cudrop + drop;
+
+$CAPTURE AGE prob ran drop cudrop
+'
+mar_dropout <- mcode('mar_dropout', mar_dropout)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(123)
+
+  mar_dropout %>%
+  ev(data.frame(ID=1:30, cmt=0)) %>%
+  mrgsim(end = 20, delta=1) %>%
+  as.data.frame() %>% #view()
+  group_by(ID) %>%
+  #filter(cudrop<2) %>%
+  ggplot(., aes(reorder(ID, AGE), time, shape=factor(drop))) +
+  geom_point() +
+  scale_shape_manual(values = c(19, 1)) +
+  theme_classic() +
+  coord_flip() +
+  scale_y_continuous(breaks = seq(0, 20, 5)) +
+  labs(y = 'Study visit number', x = 'Patient ID (ordered by age)') + 
+  theme(axis.title = element_text(size = 12,
+    face = "bold")) +labs(shape = "Dropout") + theme(axis.text.y = element_text(size = 2))
+```
+
+#### Informative Dropout (MNAR)
+
+When the probability of dropout is dependent on the current value of the observation itself, this is missing not at random (MNAR).
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+# dropout based on disease status
+```
+
+See Joint models section for additional examples of dropout based on latent characteristics.
+
+### Adherence Patterns
+
+Very few patients take their medication exactly as prescribed. In early phase clinical trials, study personnel often watch the patient take the medication so noncompliance not much of an issue, but in phase II/III and observational studies, drug adherence is a serious complication. Medication adherence is a very complicated issue with clinical, socioeconomic, and psychological factors of patients all influencing drug compliance [@adherenc].
+
+There are several ways to simulate adherence patterns for clinical trial simulation. Below are just a few. We'll use the following one-compartment PK model to simulate with each adherence pattern.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+pkmod <- '
+$PARAM @annotated
+TVKA   : 0.2 : Absorption rate constant (1/hr)
+TVCL   :  12  : Clearance (volume/time)
+TVV1    : 30  : Central volume (volume)
+
+$CMT  @annotated
+ABS    : Extravascular compartment (mass)
+CENT   : Central compartment (mass)
+
+$OMEGA @annotated
+eKA : 0.09  : eta KA
+eCL : 0.09  : eta CL
+eV1  : 0.09  : eta V
+
+$GLOBAL
+#define CP (CENT/V1)
+
+$MAIN
+double KA = TVKA*exp(eKA);
+double CL = TVCL*exp(eCL);
+double V1 = TVV1*exp(eV1);
+
+$ODE
+dxdt_ABS    = -KA*ABS;
+dxdt_CENT   =  KA*ABS - CL*CP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+'
+
+pkmod <- mcode("pkmod", pkmod)
+```
+
+#### Resampling
+
+If you actually have adherence data from a previous study of the drug you are working with, it may be reasonable just to resample the longitudinal adherence data patterns from the actual patients in the study. This is sure-fire way to produce realistic adherence patterns (because they actually happened), but is limited to the empirical (observed) distribution.
+
+#### Random missing dose probability
+
+Another option is to treat each drug dosing event as a binary outcome and simulate whether or not each dose was given based on a fixed probability. In this option, it is assumed that each drug administration event is independent of the others and that the probability of missing any given dose is constant. This can be extended to include random effects for the missing dose probability for each patient.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+# missing dose probability
+t <- 1:24
+mdp <- 0.05
+d <- data.frame(mdp, t)
+d %>%
+  ggplot(., aes(t, mdp)) +
+  geom_line() +
+  theme_classic()
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+e <- 
+  data.frame(ID = 1:10, addl=19, amt=250, ii=6, cmt=1, time=0, evid=1) %>%
+  realize_addl() %>% 
+  mutate(miss = rbinom(200, 1, prob=0.2), 
+         amt = amt*(1-miss))
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(1234)
+pkmod %>%
+  ev(e) %>%
+  mrgsim(end = 120, delta=1) %>%
+  plot(CP~time)
+```
+
+### Markov missing dose probability
+
+Another option is to treat each drug dosing event as dependent on the previous day's administration, which is more realistic than random missing dose events. Thus, if patients miss their dose today, they may be more or less likely to take their dose tomorrow. An easy way to do this is to specify a 2x2 transition matrix corresponding to whether or not the patient takes the drug today based on whether or not they took it yesterday. The transition matrix below may be read as: "
+
+$$ 
+\begin{bmatrix} 0.8 & 0.2\\ 0.4 & 0.6\\ \end{bmatrix} 
+$$
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+P <- t(matrix(c( 0.8, 0.2, 
+                 0.4, 0.6), 
+              nrow=2, ncol=2))
+```
+
+Here, I write a function to simulate with the transition matrix above.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+mmdpf <- function(P, ndoses) {
+  
+  # number of possible states
+  num.states <- nrow(P)
+  
+  # stores the states X_t through time
+  states  <- numeric(ndoses)
+  
+  # initialize variable for first state 
+  states[1] <- 1
+
+  for(i in 2:ndoses) {
+    
+    # probability vector to simulate next state X_{t+1}
+    prob  <- P[states[i-1], ]
+    
+    ## draw from multinomial and determine state
+    states[i] <-  which(rmultinom(1, 1, prob)== 1)
+  }
+  return(states)
+}
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+mmd <- mmdpf(P, ndoses=20) %>%
+  as.data.frame()
+colnames(mmd) <- 'state'
+
+mmd <- mmd %>%
+  mutate(time = 6*0:19,
+         dosing = ifelse(state==1, 1, 0),
+         amt = 250*(1-dosing),
+         cmt=1, 
+         evid=1)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+mmd %>%
+  ggplot(., aes(time, factor(dosing))) +
+  geom_point(size=3, shape=21) +
+  scale_y_discrete(labels = c('Missed', 'Taken')) +
+  scale_x_continuous(breaks = seq(0,120,6)) +
+  theme_classic() +
+  labs(x = 'Dose time (hr)', y=NULL)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(1234)
+pkmod %>%
+  ev(mmd) %>%
+  mrgsim(end = 120, delta=1) %>%
+  plot(CP~time)
+```
+
+#### Drug Holidays
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+#| eval: false
+dh <- expand.grid(ID = 1:10, dose=1:12) %>% 
+  arrange(ID, dose) %>%
+  mutate(dh = rbinom(nrow(.), 1, prob=0.2),  
+         dur = ifelse(dh==1, dh+rpois(1, 1), 0)) %>%
+  group_by(ID) %>%
+  mutate(dose = ifelse(dur>0, rep(0, 1+dur)))
+         #mutate(time = dose*24 + 24*dur) %>% view()
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+#| eval: false
+dh %>%
+  filter(time<288) %>%
+  group_by(ID) %>%
+  ggplot(., aes(time, factor(ID), label=dose)) +
+  geom_text(size=3) +
+  theme_classic() +
+  scale_x_continuous(breaks = seq(0, 288, 24)) +
+  labs(x = 'Time (days)', y = 'ID')
+```
+
+### Doctor's influence
+
+Clinicians all too familiar with patients whose adherence is more of an oscillating cycle than any of the models described above. The patient tends to have poor adherence at home, they come in for a clinic visit, the clinicians has a "serious" talk with them, they improve for a bit, and then inevitably fall back into their old ways.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+di <- function(amp, period, time) {
+  prob=amp*cos(2*3.14*time/period)
+  return(plogis(prob))
+}
+
+t <- 0:720
+plot(di(0.6, 168, t)~t)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(1234)
+e <- 
+  data.frame(ID=1:5, amt=250, time=0, addl=27, ii=24, evid=1) %>%
+  realize_addl() %>% 
+  mutate(miss = rbinom(140, 1, prob=di(0.6, 168, time=time)),
+         amt = amt*(1-miss))
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+pkmod %>% 
+  ev(e) %>% 
+  mrgsim(end=672, delta=1) %>%
+  plot(CP~time)
+```
+
+### Variability in dose times
+
+Often in PK model simulations, it is assumed that a patient takes their dose exactly q24h, q12h, etc, but we all know that this never happens in the real world. Variability may be added to the dose times, to further understand the dynamics of dosing variability in real-world patients. Typically, a window must be specified for when the dosing event occurs. how the window is specified depends on whether one assumes a measure of central tendency or makes no such assumption. For example, a patient may take their dose typically right before breakfast at 7 am, give or take 30 minutes. You could specify a normal distribution for this variability, but you would inevitably get some doses simulated at 3 am because the normal distribution extends to both positive and negative infinity.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(1234)
+e <- data.frame(ID=1:5, amt=250, time=0, addl=19, ii=6, evid=1) %>%
+  realize_addl() %>%
+  mutate(time = ifelse(time>0, time+rnorm(600, 0, 1), time))
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+  pkmod %>% 
+  ev(e) %>% 
+  mrgsim(end=120, delta=1) %>%
+  plot(CP~time)
+```
+
+### Simulating from the asymptotic distribution
+
+Often in simulations, we assume the model parameters are known with certainty. However, this may not be a wise choice. I'm not sure if this is the appropriate name for this, but I call it "simulating from the asymptotic distribution." The idea is simple. If you want to incorporate the uncertainty in your model's parameters into your simulation, all you need to do is sample from a multivariate normal distribution of the variance-covariance matrix of the model's standard errors and derive new "typical values" for each individual you are simulating with. The code below walks through the procedure.
+
+```{r}
+pk <- '
+$PARAM @annotated
+TVCL   :  10  : Clearance (volume/time)
+TVV1    : 15  : Central volume (volume)
+TVV2   : 15  : Peripheral volume (volume)
+TVQ    : 30   : Intercompartment clearance (volume/time)
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+PER    : Peripheral compartment (mass)
+
+$ODE
+dxdt_CENT   =  -CL*CP - Q*CP + Q*CT;
+dxdt_PER    =  Q*CP - Q*CT;
+
+$OMEGA @annotated
+eCL : 0.09  : eta CL
+eV1  : 0.09  : eta V1
+eV2 : 0.09  : eta V2
+eQ  : 0.09  : eta Q
+
+$GLOBAL
+#define CP (CENT/V1)
+#define CT (PER/V2)
+
+$MAIN
+double CL = TVCL*exp(eCL);
+double V1 = TVV1*exp(eV1);
+double V2 = TVV2*exp(eV2);
+double Q = TVQ*exp(eQ);
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+TVCL : typical value clearance
+TVV1 : typical value central volume
+TVV2 : typical value peripheral volume
+TVQ  : typical value intercompartmental clearance
+'
+  
+pk <- mcode("pk", pk)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+# specify a variance-covariance matrix for uncertainty in thetas
+varcov <- data.frame(TVV = c(1.2, -0.85, 0.02, -3.18),
+                     TVV2 = c(-0.85, 0.94, 0.03, 3.5),
+                     TVCL = c(0.02, 0.03, 0.03, 0.18),
+                     TVQ = c(-3.18, 3.5, 0.18, 23.4)
+                     )
+
+# convert to a matrix
+varcov <- as.matrix(varcov)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(1234)
+# generate 2000 samples from the multivariate normal distribution
+thetas <- MASS::mvrnorm(n=2000, 
+                   mu=c(10, # tvCl
+                        15, # tvV1
+                        15, # tvV2
+                        30 # tvQ
+                        ),
+                  Sigma=varcov, 
+                   tol = 1E-12)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+# convert to a dataframe and make names consistent with model
+thetas <- data.frame(thetas)
+colnames(thetas) <- c('TVV1', 'TVV2', 'TVCL', 'TVQ')
+thetas <- thetas %>%
+  mutate(ID =1:2000, evid=1, cmt=1, amt=200)
+```
+
+```{r}
+set.seed(1234)
+
+pk %>%
+  ev(thetas[sample(nrow(thetas), 10), ]) %>%
+    mrgsim(end = 12, delta=1) %>%
+  plot(CP~time)
+```
+
+### Adaptive Dosing
+
+Often in clinical trials, the protocol may specify criteria for dose changes based on intermediate evaluations, adverse events, or longitudinal evaluation of PD biomarkers. I had done things like this previously, but this paper really made the procedure quite clear [@hooijmaijers]. I highly recommend you take a look. I wish more papers like this would get published. Here is some code to demonstrate each of these previously mentioned scenarios.
+
+#### Evaluation at a prespecified time point
+
+In this example, the patient is evaluated at a prespecified time point in the trial and if their disease status is above a certain threshold, the dose of the drug is doubled.
+
+```{r}
+m1 <- '
+$PROB Evaluation at a pre-specified timepoint
+$PARAM @annotated
+TVKA   : 1      : 
+TVCL   : 10     : 
+TVV    : 30     : 
+TVBS   :  5     : baseline disease status
+TVKM   :  0.2   : progression rate
+fbio   : 1      : 
+incf   : 2      : 
+
+$OMEGA @annotated 
+eKA  : 0.09  : eta KA
+eCL : 0.09  : eta CL
+eV1  : 0.09  : eta V
+eBS   : 0.09  : eta baseline status
+eKM   : 0.09  : eta progression rate
+
+$CMT  @annotated
+ABS    : absorption compartment (mass)
+CENT   : Central compartment (mass)
+
+$ODE
+dxdt_ABS    = -KA*ABS;
+dxdt_CENT   =  KA*ABS - CL*CP;
+
+$GLOBAL
+#define CP (CENT/V)
+
+$MAIN
+if(NEWIND <=1){
+  int COND_MET = 0 ;
+  int fbio = 1;
+}
+
+double KA = TVKA*exp(eKA);
+double CL = TVCL*exp(eCL);
+double V = TVV1*exp(eV1);
+double DIS0 = TVBS*exp(eBS);
+double KM = TVKM*exp(eKM);
+
+F_ABS = fbio;
+if(condition_met) F_DEPOT = fbio * incf;
+
+$TABLE
+COND_MET = (EVID==33 && CP > COND) || condition_met;
+
+$CAPTURE F_DEPOT condition_met CP
+'
+```
+
+```{r}
+
+```
+
+#### Dose reduction following adverse event
+
+```{r}
+m1 <- '
+$PLUGIN nm-vars autodec 
+$PROB Continuous evaluation 
+$PARAM
+CL = 1, V = 20, KA = 1.1, dredf = 0.5, condition = 100
+
+$PKMODEL cmt = "DEPOT CENT", depot = TRUE
+
+$PREAMBLE
+bool condition_met = false;
+
+$PK
+if(NEWIND <=1){
+  condition_met = false;
+  fbio          = 1;
+} 
+F_DEPOT = fbio;
+if(condition_met) F_DEPOT = fbio * dredf;
+
+$ERROR
+CP = CENT/V;
+condition_met = CP > condition || condition_met;
+
+$CAPTURE F_DEPOT condition_met CP
+`
+```
+
+```{r}
+
+```
+
+#### Dosing based on longitudinal biomarker
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+# Probability of Success
+
+The probability of success (POS) for a study is often confused with power ( $1-\beta$ ). Power is a conditional value based on a specific effect size while POS is an unconditional value based on all possible effect sizes. It may be thought of as a weighted average of power across the range of possible values of effect sizes. In other words, POS can be calculated as the expected value of power.
+
+### Summary
+
+### References

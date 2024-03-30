@@ -1,0 +1,80 @@
+---
+title: "Gaussian Processes"
+author: "Tyler Dunlap, PharmD"
+execute: 
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+bibliography: references.bib
+---
+
+## Gaussian Processes
+
+```{r}
+library(tidyverse)
+library(mrgsolve)
+```
+
+## Overview
+
+Gaussian Processes are a powerful and flexible technique used for modeling and analyzing complex data relationships.
+
+### Motivating example
+
+Suppose you want to model the heterogeneity of antibody concentration across a spatial region, say tumor tissue. We will consider this to be a two-dimensional space for simplicity. Let $C(x)$ denote the concentration of drug at any location within the tumor tissue $x$ . So $C(x)$ is a function that maps the location $x$ to the real value line $R$, which can be written $C:X→R$. If we measured the drug concentration at many locations within the tumor, say $x1, x2, x3,…$ then we would obtain many pairs of concentration-location data $C(x1),C(x2), C(x3),…$ . , etc. For measurements taken close together in space, we'd expect drug concentrations to be similar. If the locations were further away, we'd expect the drug concentrations to be less similar. Are you with me? Thus, we might model the pair $C(x1),C(x2)$ using a bivariate normal distribution, in which the covariance between the two measurements depends on the distance, $d$ , between the measurement locations. The function $C$ is defined everywhere in space (the tumor tissue), but we can only measure the drug concentration at a finite number of locations. measuring it at a finite number of points -- and we assume that at any finite number of points the values we get will follow a multivariate normal distribution. This idea illustrates the definition of a Gaussian process -- it is a distribution of functions defined in a continuous space, but at any finite number of points it has a multivariate normal distribution.
+
+Thus, while the multivariate normal has a defined mean and covariance, Guassian Processes have a defined mean function $f(\mu)$ and covariance function $f(\Sigma(x_1, x_n)$ . We can simplify the Gaussian Process by making two additional assumptions: 1) that $f(\mu)$ is constant; and 2) the covariance function $f(\Sigma(x_1, x_n)$ depends only on the distance between the two points in space. Gaussian Processes that satisfy these assumptions are referred to as "stationary" and "isotropic." This simplifies defining a Gaussian Process because we just have to specify the $f(\mu)$ and function that describes how the covariance changes with increasing distance.
+
++---------------------+---------------------------------------------------------------------------------------------------------------------+
+| Kernal              | Explanation                                                                                                         |
++=====================+=====================================================================================================================+
+| Squared exponential | $exp(\frac{-|d|^2}{dl^2})$                                                                                          |
+|                     |                                                                                                                     |
+|                     | where $d$ is the distance and $l$ is a parameter that determines the length scale over which the covariance decays. |
++---------------------+---------------------------------------------------------------------------------------------------------------------+
+| Ornstein-Uhlenbeck  | $exp(\frac{-|d|}{l})$                                                                                               |
+|                     |                                                                                                                     |
+|                     | where $d$ is the distance and $l$ is a parameter that determines the length scale over which the covariance decays. |
++---------------------+---------------------------------------------------------------------------------------------------------------------+
+
+```{r}
+set.seed(123)
+x <- runif(100, 0, 1)
+d = abs(outer(x,x,"-")) # compute distance matrix
+l = 1 # length scale
+sek = exp(-d^2/(2*l^2)) # squared exponential kernel
+y = mvtnorm::rmvnorm(1,sigma=sek)
+
+heatmap(d[1:100,1:100],Rowv=NA,Colv=NA,reorderfun=NA,hclustfun=NA,distfun = function(c) as.dist(1 - c))
+```
+
+```{r}
+d2 <- data.frame()
+d2 <- d2 %>% pivot_longer(., 
+                          cols = -row,
+                          names_to = "var", 
+                          values_to = "val")
+
+ggplot(NULL, aes(d[,1], y)) +
+  geom_point() +
+  theme_minimal()
+```
+
+```{r}
+par(mfcol=c(3,3),mar=c(0.5,0.5,0.5,0.5))
+for(i in 1:9){
+  x = runif(100)
+  d = abs(outer(x,x,"-")) # compute distance matrix
+  sek = exp(-d^2/(2*l^2)) # squared exponential kernel
+  y = mvtnorm::rmvnorm(1,sigma=sek)
+  plot(x,y)
+}
+```

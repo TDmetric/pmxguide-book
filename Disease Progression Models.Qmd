@@ -1,0 +1,363 @@
+---
+title: "Disease Progression Models"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+bibliography: references.bib
+---
+
+# Disease Progression Models
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+library(tidyverse)
+library(mrgsolve)
+```
+
+## Overview
+
+Disease and pharmacodynamic modeling can enhance trial efficiency in discrimination of symptomatic and disease modifying effects. Disease progression models aim to capture the time course of disease, often over time scales of months to years. When disease progression is insidious, quantifying a treatment effect relative to placebo or standard of care must take into consideration the changing disease status of the patients over time. Examples of disease progression models are relatively rare compared to PK/PD models, but theyare essential to clinical trial simulation, thus worth spending some time with to really understand them. Importantly, placebo effects may be explicitly modeled so that the drug effect can be estimated as the observed effect minus the placebo effect. Additionally, longitudinal evaluation of drug effect may be to understand whether the drug actually modifies the time course of disease progression or simply provides symptomatic relief.
+
+### Types of Disease Progression Models
+
+Simulation from the disease model depends on the level of understanding of the disease process. Models for disease can be empirical, semimechanistic, mechanistic, or a combination of each. Many types of disease progression models are possible, but the most common used in pharmacometrics is mixed effects models of course. However, its worth knowing other types of models may be used.
+
+| Model                | Description                                                                                                                                                                                                                                                                  |
+|----------------|-------------------------------------------------------|
+| Mixed effects models | These models can be applied to understand disease progression dynamics within populations and in individual patients.                                                                                                                                                        |
+| Multistate models    | These models categorize individuals into different compartments or states, representing various disease stages and describe transition intensities of patients between states. There is an entire section of this book dedicated to multistate models. They are fascinating. |
+| Markov Models        | These models use the Markov property, where future states only depend on the current state. They're used to study transitions between discrete disease stages.                                                                                                               |
+| Stochastic Models    | These models incorporate randomness to account for random processes, uncertainty, and variability in disease progression. They're useful for capturing individual-level variation.                                                                                           |
+| Mechanistic Models   | These models may be classified as "Systems Biology" or "Quantitative Systems Pharmacology" and are models that incorporate biological mechanisms at multiple levels of the system (i.e., organs, tissues, cells).                                                            |
+
+## Treatment Effects
+
+### Symptomatic
+
+Symptomatic effects are drug effects that act directly on disease status. They may have an immediate or slow onset, but the key feature to understand is that when the drug is removed, the patient's disease status returns to the natural disease progression level as if they had not received drug at all.
+
+### Disease-Modifying
+
+Disease-modifying treatment effects alter the time-varying components of the disease model. In other words, they can actually slow the progression of disease by reducing the disease progression rate.
+
+### Placebo Effects
+
+Placebo effects typically have a quick onset and quick offset, or washout. They are modeled explicitly in disease progression models to estimate the absolute drug effect by capturing "observed" drug effects in untreated patients.
+
+### Natural disease progression
+
+Natural disease progression is typically assumed to follow a linear or nonlinear progression with time. Below is a linear regression model representing natural disease progression in which the disease status at time $t$ is a function of the patient's baseline disease status $Disease_0$ and the amount of time that has passed. The progression rate is parameterized with a $k_{prog}$ parameter which quantifies how quickly the disease progresses with time.
+
+$$
+Disease_t = Disease_0 + k_{prog}*t
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+# natural disease progression model
+ndp_code <- '
+$PARAM @annotated
+TVDIS0   : 0.6 : Baseline disease status
+TVKPROG  :  0.01  : Disease progression rate
+
+$OMEGA @annotated @block @correlation
+eDIS0   : 0.09  : eta baseline disease status
+eKPROG  : 0.3 0.09  : eta disease progression rate
+
+$MAIN
+double DIS0 = TVDIS0*exp(eDIS0);
+double KPROG = TVKPROG*exp(eKPROG);
+double DIS_T = DIS0 + KPROG*TIME;
+
+$CAPTURE @annotated
+DIS_T  : Disease status at time T
+'
+ndp <- mcode("ndp", ndp_code)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+dp <- data.frame(ID=1:10)
+
+ndp %>%
+  data_set(dp) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(DIS_T~time)
+```
+
+### Placebo effects
+
+$$
+E_{placebo} = Am* (\frac{k_{on}}{k_{on}-k_{off}})(e^{-k_{off}*t}-e^{-k_{on}*t})
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+# placebo effect model
+placebo_code <- '
+$PARAM @annotated
+TVAM    : 20  : 
+TVKON   : 0.6 : effect onset parameter
+TVKOFF  :  0.1  : effect "dissociation" parameter
+
+$OMEGA @annotated 
+eAm   : 0.09  : eta baseline disease status
+ekon  : 0.09  : eta effect onset
+ekoff : 0.09  : eta effect dissociation (wearing off)
+
+$MAIN
+double Am = TVAM*exp(eAm);
+double kon = TVKON*exp(ekon);
+double koff = TVKOFF*exp(ekoff);
+double P_effect = Am*(kon/(kon-koff))*(exp(-koff*TIME)-exp(-kon*TIME));
+
+$CAPTURE @annotated
+P_effect  : Placebo effect at time T
+'
+
+p_effect <- mcode("placebo_code", placebo_code)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+p <- data.frame(ID=1:10)
+
+p_effect %>%
+  data_set(p) %>%
+  mrgsim(end=100, delta=1) %>%
+  #obsaug() %>%
+  plot(P_effect~time)
+```
+
+### Symptomatic effects
+
+$$
+E_{sym} = C_p*k_s*(1-e^{-k_{es}*t})
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+symptomatic_code <- '
+$PARAM @annotated
+TVCP   :  20    : average plasma concentration
+TVKS   :  0.6   : effect scalar
+TVKES  :  0.1   : effect wearing off 
+
+$OMEGA @annotated 
+eCP   : 0.09  : eta baseline disease status
+eKS  : 0.09  : eta effect onset
+eKES : 0.09  : eta wearing off
+
+$MAIN
+double CP = TVCP*exp(eCP);
+double KS = TVKS*exp(eKS);
+double KES = TVKES*exp(eKES);
+double S_EFF = CP*KS*(1 - exp(-KES*TIME));
+
+$CAPTURE @annotated
+S_EFF  : Symptomatic effect at time T
+'
+
+s_effect <- mcode("symptomatic_code", symptomatic_code)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+s <- data.frame(ID=1:10)
+
+s_effect %>%
+  data_set(p) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(S_EFF~time)
+```
+
+### Disease modifying effects
+
+$$
+E_{dm}=C_p*k_m
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+dm_code <- '
+$PARAM @annotated
+TVCP   :  20    : average plasma concentration
+TVKM   :  0.6   : Modifying effect
+
+$OMEGA @annotated 
+eCP   : 0.09  : eta average plasma concentration
+eKM   : 0.09  : eta modifying effect
+
+$MAIN
+double CP = TVCP*exp(eCP);
+double KM = TVKM*exp(eKM);
+double DM_EFF = CP*KM;
+
+$CAPTURE @annotated
+DM_EFF  : Disease modifying effect
+'
+
+dm_effect <- mcode("dm_code", dm_code)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+dm <- data.frame(ID=1:10)
+
+dm_effect %>%
+  data_set(dm) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(DM_EFF~time)
+```
+
+### Drug effects (Drug-Placebo)
+
+$$
+Dis_{drug} = Dis_0+(k_{prog}-C_p*k_m)*t - placebo - C_p*k_s*(1-e^{-k_{es}*t})
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+drug_effect <- '
+$PARAM @annotated
+// Pharmacokinetic Model
+TVKA   : 0.6 : Absorption rate constant (1/hr)
+TVCL   :  6  : Clearance (volume/time)
+TVV1    : 15  : Central volume (volume)
+
+// Disease Progression model
+TVDIS0 : 1   : Baseline disease status
+TVKPROG : 1  : Linear disease progression rate
+
+// Disease Modifying effect
+TVKM    : 0.1 : Disease modifying effect of drug
+
+// Symptomatic effect
+TVKS    : 1     : Symptomatic effect
+TVKEO   : 0.1   : Wearing off of symptomatic effect
+
+// Placebo Effect
+TVAM    : 20    : 
+TVKON   : 0.6   : effect onset parameter
+TVKOFF  :  0.1  : effect "dissociation" parameter
+
+$PARAM @covariates @annotated
+PLACEBO : 1   : PLACEBO
+TRT     : 1   : TREATMENT
+
+$CMT  @annotated
+ABS    : Extravascular compartment (mass)
+CENT   : Central compartment (mass)
+
+$OMEGA @annotated
+// PK parameters
+eKA : 0.09  : eta KA
+eCL : 0.09  : eta CL
+eV1  : 0.09  : eta V
+
+// Disease progression
+eDIS0 : 0.09 : eta baseline disease status
+eKPROG : 0.09 : eta disease progression rate
+
+// Disease modifying effect
+eKM   : 0.09  : eta disease modifying effect
+
+// symptomatic effect
+eKS   : 0     : eta symptomatic effect
+eKEO  : 0     : eta wear off of symptomatic effect
+
+// Placebo effect
+eAm   : 0.09  : eta baseline disease status
+ekon  : 0.09  : eta effect onset
+ekoff : 0.09  : eta effect dissociation (wearing off)
+
+$GLOBAL
+#define CP (CENT/V1)
+
+$MAIN
+// PK parameters
+double KA = TVKA*exp(eKA);
+double CL = TVCL*exp(eCL);
+double V1 = TVV1*exp(eV1);
+double DIS0 = TVDIS0*exp(eDIS0);
+double KPROG = TVKPROG*exp(eKPROG);
+double KM = TVKM*exp(eKM);
+double KS = TVKS*exp(eKS);
+double KEO = TVKEO*exp(eKEO);
+double Am = TVAM*exp(eAm);
+double kon = TVKON*exp(ekon);
+double koff = TVKOFF*exp(ekoff);
+
+// Modifying effect
+double DM_EFF = CP*KM;
+
+// Symptomatic effect
+double S_EFF = CP*KS*(1 - exp(-KEO*TIME));
+
+// Placebo effect
+double P_EFF = Am*(kon/(kon-koff))*(exp(-koff*TIME)-exp(-kon*TIME));
+
+// Disease Status
+double DISEASE = DIS0 + (KPROG - TRT*DM_EFF)*TIME - PLACEBO*P_EFF - TRT*S_EFF;
+
+$ODE
+dxdt_ABS    = -KA*ABS;
+dxdt_CENT   =  KA*ABS - CL*CP;
+
+$CAPTURE @annotated
+PLACEBO : PLACEBO
+TRT    : TRT
+DISEASE : Disease status
+CP : Plasma concentration (mass/volume)
+'
+
+drug_effect <- mcode("drug_effect", drug_effect)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+de <- expand.ev(ID=1:10, amt=100, PLACEBO=c(0,1), TRT=c(0, 1))
+
+drug_effect %>%
+  data_set(de) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(DISEASE~time)
+```
+
+### Summary
+
+A starting point for utilization of Disease - Progression Models is consideration of how baseline conditions change with time. Several basic patterns are known. Diseases can cause structural or functional alterations of all components of PK/PD models which requires extra care in evaluating data. Read [@mould2012] (and watch her youtube lecture from the NIH Principles of Clinical Pharmacology course).
+
+### References

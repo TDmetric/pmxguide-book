@@ -1,0 +1,77 @@
+---
+title: "Joint Models"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Joint Models
+
+```{r}
+library(tidyverse)
+library(mrgsolve)
+```
+
+### Overview
+
+Ultimately, the goal of every pharmacometric analysis is to provide evidence toward the potential benefit or risk of a pharmacological treatment. Often, relationships between the treatment, disease, and clinical outcomes are so interwined that accurately estimating one is not possible without consideration for the other. Classically, in clinical trials, joint modeling these methods have been used to handle missing data problems (informative dropout). For example, if a drug is be evaluated for its ability to slow cognitive decline in patients with Alzheimer's disease, patient's who experience rapid cognitive decline (poor efficacy) or have the most severe disease (lowest cognition) may be most likely to drop out of the study because they are not benefiting from the drug or are simply lost to follow up. Any efficacy analysis that does not consider this informative dropout mechanism will be systematically bias in favor of the treatment because the analysis set has been enriched with responders. Additionally, joint models are commonly used to assess the relationship between and endogenous biomarker and a clinical outcome. Patients with HIV who experience rapid decline in their CD4+ T-cell count may be at greater risk for death relative to patients who have a stable CD4+ cell count, irrespective of the magnitude of the cell counts. In this example, it is the trajectory of the biomarker, not the absolute value of the biomarker that is strongly related to the clinical outcome. Joint models provide a methodological framework for obtaining unbiased estimates of the relationship between a longitudinal process and clinical outcome. Herein, I provide a brief introduction to the conceptual building blocks relevant to the joint modeling of longitudinal data and time-to-event (TTE) outcomes.
+
+For example, patients with a tumour that is increasing in sizeare at a higher risk of death. Consequently, increasing TS profileswill only be observed for a short time before the patient dies.However, good responders, i.e. flat or decreasing TS profiles, will beobserved over a longer time. Therefore, as time goes by, theobserved population becomes less representative of the true diver-sity of TS profiles. This mechanism may lead to a biased estimationof longitudinal model parameters. Indeed, low value of TS will beoverrepresented compared to high values in the later times of theobservation period, so that the model will underestimate theaverage profile (Figure 1).
+
+#### Why JMs?
+
+You want to:
+
+1.  estimate the association between the estimated value, trajectory, AUC, etc of an **endogenous** covariate(s) and a clinical event(s);
+
+2.  estimate the association between a treatment and efficacy/safety outcomes when the censoring process is informative;
+
+3.  develop a dynamic, prognostic model, where predictions of event risk can be updated as new biomarker measurements become available.
+
+## Extensions
+
+### Alternative association structures
+
+| Association structure | Description                                                                                                                                                                                    | Example |
+|------------------|------------------------------------|------------------|
+| Lag-link              | The coefficient in the hazard model is related not to the current value now, but some value in the past.                                                                                       |         |
+| Trajectory            | I like to think of this as an assessment of the first derivative of the longitudinal process. The hazard is related to the slope of the longitudinal process (IPRED).                          |         |
+| AUC                   | Essentially, a combination of the current value and trajectory function link structures. Hazard is related to the magnitude of the current value and the trajectory it has taken to get there. |         |
+
+These are just basic structures to alternative association structures. They may be combined in various ways (e.g., a JM with association parameters for the current value and trajectory of the longitudinal marker). Furthermore, the association parameters may be functions of covariates. Interactions between association structures may be tested. The possibilities are endless. Model specification should be guided by the science, the question to be addressed, and sometimes (unfortunately) being able to get the model to converge.
+
+#### Shared Random Effects Model
+
+```{r}
+
+```
+
+#### Lagged Link
+
+```{r}
+
+```
+
+#### Trajectory Link
+
+```{r}
+
+```
+
+#### AUC Link
+
+### Joint Model Diagnostics
+
+### References
+
+### Recommended Reading/Resources

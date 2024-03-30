@@ -1,0 +1,199 @@
+---
+title: "Estimation Methods"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+bibliography: references.bib
+---
+
+# Estimation Methods
+
+### Maximum Likelihood Estimation
+
+The likelihood function measures the probability of observing the given data for a given set of parameter values. It represents how well the model explains the observed data. MLE aims to find the parameter values that *maximize* the likelihood function, making the observed data most probable under the model. To simplify computations, the logarithm of the likelihood function (log-likelihood) is often used. Maximizing the log-likelihood is equivalent to maximizing the likelihood.
+
+-   **Assumption of a Parametric Model:**
+
+    -   MLE assumes that the data is generated from a specific parametric probability distribution or statistical model, characterized by a set of parameters.
+
+-   **Likelihood Function:**
+
+    -   The likelihood function is a function of the parameters that measures how well the chosen model explains the observed data.
+
+    -   It's calculated by taking the product of the probability density function (PDF) or probability mass function (PMF) of each individual data point, given the parameters.
+
+-   **Log-Likelihood Function:**
+
+    -   In practice, it's often more convenient to work with the log-likelihood function, which is the natural logarithm of the likelihood function. Maximizing the log-likelihood is equivalent to maximizing the likelihood, as the logarithm does not change the location of the maximum.
+
+-   **Parameter Estimation:**
+
+    -   The goal of MLE is to find the values of the parameters that maximize the likelihood (or log-likelihood) function.
+
+    -   This is typically done using optimization techniques, such as gradient descent, Newton-Raphson, or other numerical optimization methods.
+
+    -   Some optimization algorithms require gradient and/or Hessian information of the log-likelihood, which can sometimes be obtained analytically or through numerical methods.
+
+    -   
+
+-   **Interpretation of Results:**
+
+    -   The estimated parameter values that maximize the likelihood represent the "best-fit" parameters for the assumed model, given the observed data.
+
+    -   The likelihood value at the maximum corresponds to the likelihood of observing the given data under the estimated parameter values.
+
+-   **Properties:**
+
+    -   Under certain regularity conditions, MLE estimators have desirable statistical properties, such as consistency, asymptotic normality, and efficiency (in many cases, MLE estimators are asymptotically efficient).
+
+### First Order Conditional Expectation with Interaction (FOCE-I)
+
+FOCE-I is an iterative optimization algorithm that aims to find parameter estimates that maximize the likelihood of observing the data given the model. This is the default algorithm in NONMEM.
+
+## Expectation-Maximization (EM) Methods
+
+### Importance Sampling
+
+Importance Sampling (IMP) is a .... In IMP, the expectation step is performed by creating random normal deviates of $\eta s$ and evaluating the conditional density of these $\eta s$ for each subject. The sampler is typically centered at the mode or the mean of the conditional density and a variance that approximates the variance of the conditional density; hence it samples in the "important" region of the conditional density [@bauer2019b]. On the first iteration, this information is not available, so the mode and its FO approximation of the variance is obtained and used as the mean and variance for the sampler. On subsequent iterations, the MAP estimation may be repeated to obtain the normal random sampler parameters, or the conditional Monte Carlo mean and conditional Monte Carlo variance obtained from the IMP of the previous iteration may be used. With this method, weighted averages of conditional means and variances of individual parameters (or ETAs) as well as accurate (with stochastic variation) assessments of the objective functions for each individual. The weight to each ETA sample is proportional to the goodness of fit of the sample relative to the probability of the sampler to select that sample, and it reflects the properties of the exact conditional density. Usually 300--1,000 random samples are used for each subject, and about 50--200 iterations are required to approach the maximum likelihood population parameters.
+
+::: callout-note
+Importance Sampling EM (IMP) is most useful for sparse (few data points per subject, that is, fewer data points than there are etas to be estimated for a given subject) or rich data, and complex PK/PD problems with many parameters [@bauer2019c]
+:::
+
+### Stochastic Approximation Expectation-Maximization (SAEM)
+
+The Stochastic Approximation Expectation-Maximization (SAEM) algorithm is a very useful estimation method for complicated models. Similar to the IM algorithm, in SAEM, random samples are generated from a proposal density. However, instead of being centered at the mode of the conditional density, the proposal density is centered at the previous sample's position. New samples are accepted with a probability that is related to the conditional density (goodness of fit) at the particular ETA sample position. The variance of the proposal density is adjusted during the procedure to maintain a certain average acceptance rate.
+
+SAEM requires two modes of estimation. In the first, SAEM evaluates a stochastic approximation of individual parameters. Population parameters are updated from individual parameters by single-iteration maximization steps that are very stable and statistically proven to improve the objective function (usually in 300--2,000 iterations). In the second mode, individual parameter samples from previous iterations are averaged together, converging toward the true conditional individual parameter means and variances. This leads to population parameters converging toward the maximum of the exact likelihood. It is important to remember that SAEM is not able to assess an objective function to be used in hypothesis testing ( $\Delta OFV/AIC/BIC)$ . In [@bauer2019a], Bauer recommends objective function and standard errors from the final model be obtained using one or a few iterations of an IMP step following SAEM with population parameters fixed at the final SAEM values. This results in an apparantly "expectation-only" IMP because the maximization of population parameters has already been achieved by the SAEM step. SAEM is implemented in NONMEM, nlmixr, and Monolix.
+
+::: callout-note
+SAEM is useful for non-normally distributed conditional densities.
+:::
+
+### Iterative Two-Stage
+
+This is an approximate conditional method that is able to analyze complex PK/PD problems with great efficiency and incidence of success. Although it is more accurate than FO, it is not as accurate as FOCE (NONMEM7 Technical Guide[1](https://ascpt.onlinelibrary.wiley.com/doi/10.1002/psp4.12422#psp412422-bib-0001), [3](https://ascpt.onlinelibrary.wiley.com/doi/10.1002/psp4.12422#psp412422-bib-0003)) When data are not rich (a subject is rich in data when there are many more data points than ETAs being estimated) and/or residual variability of data is large. The efficiency reduces considerably when the model cannot be expressed in a particular fixed/random effect (PHI/MU) format (MU Referencing section). This method is considered a deterministic EM method. The ITS evaluates the conditional mode (not mean!) and first order (expected) approximation of the variance of parameters of individuals by maximizing the conditional density. This integration (expectation) step is the same as in FOCE. The parameters are updated using the mean of the conditional modes and approximate individual variances, and therefore it is less accurate than the Monte Carlo EM methods. They are updated by single-iteration maximization steps that are very stable (usually in 50--100 iterations). For rich data, ITS is almost as accurate as FOCE but much faster.
+
+### Quasi-Random Parametric Expectation-Maximization (QRPEM)
+
+This algorithm is implemented in Phoenix NLME.
+
+::: callout-important
+The following table is made from information in [@bauer2019]
+:::
+
++----------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Method                                                         | Recommended Use-Cases                                                                                                                                                          |
++================================================================+================================================================================================================================================================================+
+| **First Order Conditional Estimation w/ Interaction (FOCE-i)** | -   Rich and semi-rich data.                                                                                                                                                   |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Does not require MU-referencing                                                                                                                                            |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Good for models with many $\theta s$ with no $\eta s$ associated with them                                                                                                 |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   More accurate than ITS                                                                                                                                                     |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Results are highly reproducible up to +/- 4 significant digits                                                                                                             |
++----------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| **Importance Sampling (IMP)**                                  | -   Complex PK/PD problems with ODEs and/or many parameters                                                                                                                    |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Sparse or rich data                                                                                                                                                        |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Can be less accurate than SAEM with highly categorical data or very sparse data                                                                                            |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Can track progress of improvement in true objective function with each iteration.                                                                                          |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Results can vary stochastically by about 25% of standard error                                                                                                             |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Less efficient when some or many $\theta s$ may not be MU-referenced                                                                                                       |
++----------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| **Stochastic Approximation Expectation Maximization (SAEM)**   | -   Categorical data                                                                                                                                                           |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Very sparse, sparse, or rich data                                                                                                                                          |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Complex PK/PD problems with many parameters (may sometimes reach true objective function only within +/- 10 units of optimum and can take longer than Importance Sampling. |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   **Cannot assess true objective function during its progress, must finish analysis with IMP assessment of objective function**                                              |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Results can vary stochastically, typically by about 25% of standard errors                                                                                                 |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Can handle full $\omega$ blocks well                                                                                                                                       |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Less efficient when some or many $\theta s$ may not be MU-referenced                                                                                                       |
++----------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| **Iterative Two-Stage (ITS)**                                  | -   Rich data                                                                                                                                                                  |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   **Rapid, exploratory method**                                                                                                                                              |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Can be used as pre-analysis to facilitate IM or SAEM                                                                                                                       |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Requires less "fuss" with adjusting options than IMP and SAEM                                                                                                              |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Results are highly reproducible to +/- 4 digits                                                                                                                            |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Can have large bias or instability for some problems                                                                                                                       |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Can handle full $\omega$ blocks well                                                                                                                                       |
+|                                                                |                                                                                                                                                                                |
+|                                                                | -   Less efficient when some or many $\theta s$ may not be MU-referenced                                                                                                       |
++----------------------------------------------------------------+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+## MCMC Methods for Bayesian Analysis
+
+### Random Walk Metropolis
+
+#### Metropolis-Hastings Algorithm
+
+To implement the MH algorithm, the user must provide a "transition kernal", Q, which is simply a way of moving, randomly, to a new position in space, given a current position. That is, Q is a distribution on y given x, $Q(y|x)$ .
+
+The algorithm helps us simulate samples from a target distribution by iteratively updating the state of a Markov chain.
+
+Choose a proposal distribution, which suggests new states for the Markov chain.
+
+**Initialization:**
+
+-   Start with an initial state or parameter value.
+
+At each iteration:
+
+-   Propose a new state by drawing a sample from the proposal distribution based on the current state.
+
+-   Calculate the acceptance ratio:
+
+-   Accept the proposed state with a probability equal to the acceptance ratio.
+
+    -   If accepted, move to the proposed state.
+
+    -   If rejected, stay in the current state.
+
+-   **Sampling:**
+
+    -   After a certain number of iterations (also known as burn-in), start collecting the generated states as samples from the target distribution.
+
+    -   **Analysis:**
+
+        -   Analyze the collected samples to estimate properties of the target distribution, such as means, variances, quantiles, and other relevant statistics.
+
+    The Metropolis-Hastings algorithm allows the chain to explore the entire parameter space and eventually converge to the desired distribution, even if the proposal distribution is not a good match for the target distribution. The acceptance ratio ensures that the algorithm biases toward regions of parameter space where the target distribution is higher. The proposal distribution can be chosen to balance between exploration (wide proposal distribution) and efficiency (localized proposal distribution). Convergence diagnostics, like trace plots and the Gelman-Rubin statistic, are used to assess the quality of the generated samples and determine when the chain has reached a stable state. The algorithm's performance depends on the choice of the proposal distribution and other tuning parameters.
+
+#### Gibbs Sampling
+
+The algorithm iteratively updates one variable at a time while keeping the other variables fixed. This step-by-step approach allows Gibbs sampling to take advantage of the conditional distributions, which might be simpler to sample from than the full joint distribution. The convergence of the algorithm is generally assessed using convergence diagnostics, similar to those used in other MCMC algorithms, such as the Metropolis-Hastings algorithm. Gibbs sampling can be particularly effective when there is conditional independence between variables given the rest of the variables. In such cases, the algorithm converges more quickly and efficiently. Gibbs sampling is widely used for Bayesian analysis, where it's often applied to models with latent variables or complex dependencies between variables. In some cases, it might not be straightforward to directly sample from the conditional distributions. In these situations, techniques like Metropolis-Hastings within Gibbs can be employed as a substitute. Careful initialization is important to avoid convergence issues, and multiple chains can be run from different starting points to assess convergence.
+
+#### Hamiltonian Monte Carlo (HMC)
+
+Hamiltonian Monte Carlo (HMC) is a sophisticated and efficient sampling algorithm used for Bayesian inference and complex statistical modeling. It is particularly effective for exploring high-dimensional parameter spaces and overcoming challenges posed by slow exploration and correlation in traditional Markov Chain Monte Carlo (MCMC) methods. Markov Chain Monte Carlo methods simulate samples from complex probability distributions, allowing Bayesian inference and parameter estimation. HMC draws inspiration from physics, where Hamiltonian dynamics describes the evolution of particles in a physical system based on their potential energy and kinetic energy. HMC utilizes gradient information of the target distribution to guide the exploration of the parameter space, leading to more efficient sampling.
+
+There is a great read about HMC by Michael Betencourt. It's absolutely worth the time before using Stan.
+
+### References

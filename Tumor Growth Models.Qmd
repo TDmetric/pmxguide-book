@@ -1,0 +1,561 @@
+---
+title: "Tumor Growth Models"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+bibliography: references.bib
+---
+
+# Tumor Growth Inhibition Models
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+library(tidyverse)
+library(mrgsolve)
+```
+
+## Overview
+
+After a growing phase, tumors experience a saturation due to limits of nutrient supply. However, this saturation property is often never measured in patients in practice because the host dies in the majority of cases before this saturation phase begins. Also in preclinics, the experiments have to be canceled if a specific tumor size is reached due to ethical reasons. Thus, tumor growth models may be divided into two broad categories: those which are able to capture the saturation as the tumor grows (achieved by the introduction a carrying capacity or a spontaneous decay component) and those which do not.
+
+## Growth Models
+
+### Linear Growth
+
+The linear tumor growth assumes a constant zero-order growth rate.
+
+$$
+\frac{dTS}{dt} = kg
+$$
+
+$$
+TS(y) = kg*t + TS_0
+$$
+
+```{r}
+lg <- '
+$PARAM @annotated
+kg   :  100  : growth rate (cells/day)
+
+$CMT  @annotated
+TS   : tumor size (# of cells)
+
+$MAIN
+TS_0 = 1E6;
+
+$ODE
+dxdt_TS   =  kg;
+'
+
+lg <- mcode("lg", lg)
+```
+
+```{r}
+lg %>%
+  ev(data.frame(ID=1)) %>%
+  mrgsim(end = 100, delta=1) %>%
+  plot(TS~time)
+```
+
+### Exponential
+
+The exponential growth assumes the growth rate of a tumor is proportional to tumor burden (first-order growth).
+
+$$
+\frac{dTS}{dt}=kg*TS
+$$
+
+$$
+TS(t) = kg_1*t+kg_2*t^2+TS_0
+$$
+
+```{r}
+eg <- '
+$PARAM @annotated
+kg   :  0.1  : growth rate (1/day)
+
+$CMT  @annotated
+TS   : tumor size (# of cells)
+
+$MAIN
+TS_0 = 1;
+
+$ODE
+dxdt_TS   =  kg*TS;
+'
+
+lg <- mcode("eg", eg)
+```
+
+```{r}
+eg %>%
+  ev(data.frame(ID=1)) %>%
+  mrgsim(end = 100, delta=1) %>%
+  plot(TS~time)
+```
+
+### Power-law Growth
+
+If 0 \< gamma \< 1, the power law model (also named generalized exponential) provides a description in terms of a geometrical feature of the proliferative tissue: the growth rate is proportional to the number of proliferative cells as a fraction of the full tumor volume. The case gamma=1 corresponds to proliferative cells uniformly distributed within the tumor and leads to exponential growth. The case gamma=2/3 represents a proliferative layer of cells on the cell surface (i.e., tumor radius grows linearly in time).
+
+$$
+dTS=kg*TS^\gamma
+$$
+
+$$
+TS(t) = (kg*(1-\gamma)*t+TS_0^{1-\gamma})^{\frac{1}{1-\gamma}}
+$$
+
+```{r}
+pg <- '
+$PARAM @annotated
+kg   :  0.01  : growth rate
+gamma : (2/3)  : gamma
+
+$CMT  @annotated
+TS   : tumor size (# of cells)
+
+$MAIN
+TS_0 = 1000;
+
+$ODE
+dxdt_TS   =  kg*pow(TS, gamma);
+'
+
+pg <- mcode("pg", pg)
+```
+
+```{r}
+pg %>%
+  ev(data.frame(ID=1)) %>%
+  mrgsim(end = 1000, delta=1) %>%
+  plot(TS~time)
+```
+
+### Logistic Growth
+
+This model assumes an exponential growth rate which decelerates linearly with respect to the tumor size. This results in sigmoidal dynamics -- with an initial exponential growth phase followed by a growth-saturated phase as the tumor reaches its carrying capacity $TS_{cc}$. 
+
+$$
+\frac{dTS}{dt} = kg*TS*(1-(TS/TS_{cc}))
+$$
+
+```{r}
+logg <- '
+$PARAM @annotated
+kg   :  0.01  : growth rate (1/day)
+CC   : 1E7    : 
+
+$CMT  @annotated
+TS   : tumor size (# of cells)
+
+$MAIN
+TS_0 = 1E5;
+
+$ODE
+dxdt_TS   =  kg*TS*(1 - (TS/CC));
+'
+
+logg <- mcode("logg", logg)
+```
+
+```{r}
+logg %>%
+  ev(data.frame(ID=1)) %>%
+  mrgsim(end = 1000, delta=1) %>%
+  plot(TS~time)
+```
+
+### Generalized Logistic Growth
+
+In this model, tumor growth depends on tumor size with a generalized logistic function. It reduces to the logistic model if $\gamma=1$ or to the Gompertz model when $\gamma=0$.
+
+$$
+\frac{dTS}{dt}=kg*TS*(1-(\frac{TS}{TS_{cc}})^\gamma)
+$$
+
+```{r}
+glg <- '
+$PARAM @annotated
+kg   :  0.01  : growth rate (1/day)
+CC   : 1E7    : Carrying capacity
+gamma : (2/3)  : 
+
+$CMT  @annotated
+TS   : tumor size (# of cells)
+
+$MAIN
+TS_0 = 1E5;
+
+$ODE
+dxdt_TS   =  kg*TS*(1 - pow((TS/CC), gamma));
+'
+
+glg <- mcode("glg", glg)
+```
+
+```{r}
+glg %>%
+  ev(data.frame(ID=1)) %>%
+  mrgsim(end = 100, delta=1) %>%
+  plot(TS~time)
+```
+
+### Gompertz Growth
+
+The Gompertz model follows the observation of a deceleration of the growth rate over time, without any phase at which the growth rate remains constant. Several parameterizations can be used, and two are displayed on the table below. The first parameterization is the one implemented in the library, and the one for which the impacts of the parameters are the most separate and easiest to control. However, the carrying capacity $TS_{cc}$ can be difficult to estimate and can lack biological meaning if no clear tumor size saturation is seen. With the second parameterization, alpha and beta have an impact on the carrying capacity and on the growth rate, while $TS_0$ also has an impact on the carrying capacity.
+
+$$
+\frac{dTumor}{dt} = kg*(ln(TS_{ss}-ln(TS))*TS
+$$
+
+```{r}
+gg <- '
+$PARAM @annotated
+kg   :  0.01  : growth rate (1/day)
+TSss   : 1E7    : Carrying capacity
+gamma : (2/3)  : 
+
+$CMT  @annotated
+TS   : tumor size (# of cells)
+
+$MAIN
+TS_0 = 1E5;
+
+$ODE
+dxdt_TS   =  kg*(log(TSss - log(TS))*TS;
+'
+
+gg <- mcode("gg", gg)
+```
+
+```{r}
+gg %>%
+  ev(data.frame(ID=1)) %>%
+  mrgsim(end = 100, delta=1) %>%
+  plot(TS~time)
+```
+
+### Quadratic Growth
+
+The quadratric tumor growth combines linear and quadratic growth rates.
+
+$$
+\frac{dTS}{dt} = kg_1+2*kg_2*t
+$$
+
+$$
+TS(t) = kg_1*t + kg_2*t^2+TS_0
+$$
+
+## Growth-Inhibition (treatment effects) Models
+
+A wide range of ODEs models for tumour growth (TG) and tumour growth inhibition (TGI) is available in the literature and correspond to different hypotheses on the tumor or treatment dynamics. In the absence of detailed biological knowledge, selecting the most appropriate model is a challenge.
+
+<div>
+
+**Skipper-Schabel-Wilcox log-kill hypothesis**: This hypothesis states that exposure to a given amount of treatment kills a constant fraction of the total tumour cell population by increasing apoptosis. Consequently, the proportion of tumour cells removed every time a dose of treatment is administered remains constant regardless of the size of the tumor at the start of therapy. Tumor cell log-kill is typically induced by a standard cytotoxic or a targeted therapy. With this hypothesis, the Tumor Static Concentration (TSC) corresponds to K\*TS=growth.
+
+**Norton-Simon killing hypothesis**: This hypothesis was based on the observation that faster-growing tumors respond better to chemotherapy than do slower-growing tumors, and states that the killing term is proportional to growth rate (tumor growth modulation). In the case of an anti-angiogenic drug for example, the cytostatic effect is assumed to be due to a direct inhibitory action on the unperturbed tumor growth rates. With this hypothesis, and if no decay or apoptosis term is considered, the Tumor Static Concentration (TSC) corresponds to K=1.
+
+</div>
+
+#### Model
+
+$$
+y(t) = y_0*e^{-kd*t}+g*t
+$$
+
+```{r}
+#| eval: false
+m1 <- '
+$PARAM @annotated
+kg   :  0.03  : growth rate (1/day)
+kd   : 0.01   : death rate (1/day)
+y0   : 100  : cells
+
+$PRED
+double TS = y0*exp(-kd*TIME)+kg*TIME;
+
+$CAPTURE TS
+'
+```
+
+#### Model
+
+$$
+y(t) = y_0*(e^{-kd*t}+e^{kg*t}-1)
+$$
+
+```{r}
+#| eval: false
+m2 <- '
+$PARAM @annotated
+kg   :  0.03  : growth rate (1/day)
+kd   : 0.01   : death rate (1/day)
+y0   : 100  : cells
+
+$PRED
+double TS = y0*(exp(-kd*TIME)+exp(kg*TIME)-1);
+
+$CAPTURE TS
+'
+```
+
+#### Model
+
+$$
+\frac{dTS}{dt}=a*TS*(TS_0*effect-TS)
+$$
+
+$$
+effect = 1-\frac{E_{max}*Ce}{EC_{50} + Ce}
+$$
+
+$$
+\frac{dCe}{dt}=k_{eo}*(Exposure-Ce)
+$$
+
+```{r}
+m3 <- '
+$PARAM @annotated
+CL    : 3     :
+V     : 5     :
+Ve    : 1     :
+alpha : 0.1   : 
+keo   : 0.01  : 1/time
+EMAX  : 10    :
+EC50  : 3     : 
+TS0    : 1000  : 
+
+$CMT CENT EFF TS
+
+$GLOBAL
+#define CP (CENT/V)
+#define CT (EFF/Ve)
+#define effect (1-((EMAX*CT)/(EC50+CT)))
+
+$ODE
+dxdt_CENT = -CL*CP - keo*CP + keo*CT;
+dxdt_EFF = keo*CP + keo*CT;
+dxdt_TS = alpha*TS*(TS0*effect-TS);
+
+$MAIN
+TS_0 = TS0;
+
+$CAPTURE @annotated
+CP      : plasma concentration
+CT      : Tumor concentration
+effect  : drug effect
+'
+```
+
+#### Model
+
+$$
+\frac{dTS}{dt}=kg*TS-kd*e^{-\lambda*t}*TS
+$$
+
+$$
+effect = \beta*Ce
+$$
+
+```{r}
+m4 <- '
+$PARAM @annotated
+CL    : 3     : drug clearance
+V     : 5     : central volume
+Ve    : 1     : tumor volume
+beta  : 0.8   : linear effect
+kg    : 0.03  : growth rate
+kd    : 0.01  : death rate
+lambda: 0.001 : resistance rate
+TS0   : 1000  : baseline size
+
+$CMT CENT EFF TS
+
+$GLOBAL
+#define CP (CENT/V)
+#define CT (EFF/Ve)
+#define effect (beta*CT)
+
+$ODE
+dxdt_CENT = -CL*CP - keo*CP + keo*CT;
+dxdt_EFF = keo*CP + keo*CT;
+dxdt_TS = kg*TS - kd*exp(-lambda*SOLVERTIME)*TS;
+
+$MAIN
+TS_0 = TS0;
+
+$CAPTURE @annotated
+CP      : plasma concentration
+CT      : Tumor concentration
+effect  : drug effect
+'
+```
+
+```{r}
+
+```
+
+#### Model
+
+$$
+\frac{dTS}{dt}=kg*TS*log(\frac{\theta}{TS})-kd*e^{-\lambda*t}
+$$
+
+$$
+effect = \beta*exposure
+$$
+
+#### Model
+
+$$
+\frac{dR}{dt} = k12*S
+$$
+
+$$
+\frac{dS}{dt} = -k12*S - effect*S
+$$
+
+## Advances
+
+### Dynamic carrying capacity
+
+The carrying capacity of the tumor may vary or change with time due to factors such as angiogenesis.
+
+$$
+\frac{dTS_{cc}}{dt}=kp_v*TS-\kappa*TS_{cc}-kd_v*TS*TS^{2/3}
+$$
+
+### Immune dynamics
+
+A model of tumor-immune interactions with chemotherapy proposed taking into account the control of the tumor growth by the immune system, and the weakening of the immune system as a side effect of chemotherapy. The model includes an additional ODE defining effector--immune cells:
+
+$$
+\frac{dTS}{dt}=kg-ki*I*TS
+$$
+
+$$
+\frac{dI}{dt}=kp_i-kd_i*I+kg*\frac{TS}{h+TS}*I-p*I*TS
+$$
+
+## Examples
+
+#### TKI-mediated cell killing of proliferating bone marrow cell populations
+
+::: callout-note
+Model is slightly modified from the original publication [@combes2022]
+:::
+
+```{r}
+asciminib <- '
+$PROB asciminib exposure-efficacy model
+Combes FP, Li YF, Hoch M, Lorenzo S, Ho YY, Sy SKB. Exposure-Efficacy Analysis of Asciminib in Philadelphia Chromosome-Positive Chronic Myeloid Leukemia in Chronic Phase. Clin Pharmacol Ther. 2022 Nov;112(5):1040-1050. doi: 10.1002/cpt.2699. Epub 2022 Jul 31. PMID: 35776072.
+
+$PARAM @annotated
+// compartment rate constants
+tvQ         :   0.0179        : typical value Quiescent cell population
+tvP         :   0.026         : typical value Proliferating cell population
+tvR         :   0.00000113    : typical value Resistant cell population
+kgr         :   28/365        : 1/year (convert to daily)
+kqp         :   0.589/365     : 1/year 
+kqr         :   6.5 /365      : 1/year
+tvEffmag    :   44.3/365      : typical value drug Effect magnitude
+gamma       :   0.351         : power parameter for drug effect // increasing ten fold (0.035 original)
+H           :   1             : number of healthy cells
+
+// covariate effects
+DPK                      :   0          : Individual daily PK (will input from poppk simulations)
+mDPK                     :   1.25       : median daily PK for 120 mg BID typical patient
+l10ba0_Q_eff             :   1.54       : baseline log10-transformed BCR:ABL on Q
+l10ba0_P_eff             :   2.52       : baseline log10-transformed BCR:ABL on P
+l10ba0_R_eff             :   2.32       : baseline log10-transformed BCR:ABL on R
+numttrt2_Effmag_eff      :   -0.047     : effect of 2 prior tki on eff mag
+numttrt3_Effmag_eff      :   -0.147     : effect of 3 prior tki on eff mag
+numttrt4_Effmag_eff      :   -0.199     : effect of 4 prior tki on eff mag
+numttrt5_Effmag_eff      :   -0.211     : effect of 5 prior tki on eff mag
+mt315i_P_eff             :   -0.377     : effect of mt315i mutation on Proliferating cell population
+mt315i_R_eff             :   2.29       : effect of mt315i mutation on Resistant cell population
+mt315i_Effmag_eff        :   -0.137     : effect of mt315i mutation on Drug Effect magnitude
+fdiag_R_eff              :   1.25       : effect of time since diagnosis on Resistant cell population
+
+// covariates
+//$PARAM @covariates @annotated
+$PARAM @annotated
+l10ba0         :  1      : log10 baseline bcr able
+mt315i         :  0       : mutation
+numttrt2       :  0       : number of prior tki therapies
+numttrt3       :  0       : number of prior tki therapies
+numttrt4       :  0       : number of prior tki therapies
+numttrt5       :  0       : number of prior tki therapies
+fdiag          :  0    : time since diagnosis
+    
+$CMT @annotated
+P       : Proliferating bone marrow
+Q       : Quiescent leukemic stem cells (Q)
+R       : Resistance cells
+
+$ODE
+dxdt_P = kqp*Q - kpq*P + kgr*(1 - ((P+R+Q)/totmax)) * P - DRUG*P; 
+dxdt_Q = kpq*P + krq*R - (kqp+kqr)*Q;
+dxdt_R = kqr*Q - krq*R + kgr*(1 - ((R+P+Q)/totmax)) * R; 
+
+$OMEGA @block @annotated
+ETA_Q         :  11.08  : ETA Quiscent Population 
+ETA_Eff_mag   :  -0.556  0.075 : ETA Effect magnitude 
+  
+$OMEGA @annotated
+ETA_P    : 0.06   : ETA Proliferating Population
+ETA_R    : 6.25   : ETA Resistant Population 
+  
+$SIGMA @annotated
+add : 0.196 : additive
+prop : 0.059 : proportional
+
+$MAIN
+// Initial conditions
+P_0 = P0;
+Q_0 = Q0;
+R_0 = R0;
+
+// Individual parameters
+double Q0 = tvQ * exp(l10ba0_Q_eff*l10ba0 + ETA_Q);
+double P0 = tvP * exp(l10ba0_P_eff*l10ba0 + mt315i_P_eff*mt315i + ETA_P);
+double R0 = tvR * exp(l10ba0_R_eff*l10ba0 + mt315i_R_eff*mt315i + fdiag_R_eff*fdiag + ETA_R);
+double kpq = kqp*(Q0/P0);
+double krq = kqr*(Q0/R0);
+double tot = P+R+Q;
+double totmax = 10*(P0+R0+Q0);
+double Effmag = tvEffmag * exp(numttrt2_Effmag_eff*numttrt2 + numttrt3_Effmag_eff*numttrt3 + numttrt4_Effmag_eff*numttrt4 + numttrt5_Effmag_eff*numttrt5 + mt315i_Effmag_eff*mt315i + ETA_Eff_mag);
+double DRUG = Effmag*pow((DPK/mDPK), gamma);
+double ratio = (P + R)/(2*H + (P + R));
+double DIS = P + R + Q;
+
+$TABLE
+capture  bcrable = 100*ratio;
+capture  out = bcrable * (1+prop) + add;
+  
+$CAPTURE P0 R0 Q0 tot totmax ratio bcrable l10ba0 mt315i numttrt2 numttrt3 numttrt4 numttrt5 fdiag DPK mDPK
+'
+```
+
+#### Combination Chemotherapy with Immunotherapy on multiple target lesions
+
+```{r}
+# eval: false
+```
+
+### References

@@ -1,0 +1,185 @@
+---
+title: "Quantitative Systems Pharmacology"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    echo: false
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Quantitative Systems Pharmacology
+
+```{r}
+library(tidyverse)
+library(mrgsolve)
+```
+
+### Overview
+
+```{r}
+bpd_qsp <- '
+[ PROB ] 
+
+Bispecific Protein Degrader Model
+
+1: Bartlett D, Gilbert A. A kinetic proofreading model for bispecific protein degraders. Journal of Pharmacokinetics and Pharmacodynamics. 2020 Sept 21;.
+
+[ PARAM ] 
+
+// {Model Parameters}
+kon_Target_binary  	= 3600      		// Target protein BPD binary association rate (L/umol/h)
+kd_Target_binary 	= 0.01     		// Target protein-BPD binary equilibrium dissociation constant (umol/L)
+koff_Target_binary 	= 36     		// Target protein-BPD binary dissociation rate (1/h)
+kon_Target_ternary 	= 3600     		// Target protein-BPD ternary association rate (L/umol/h)
+koff_Target_ternary 	= 36     		// Target protein_BPD ternary dissociation rate (1/h)
+kd_Target_ternary 	= 0.01    		// Target protein-BPD ternary equilibrium dissociation constant
+kon_E3Lig_binary 	= 3600     		// E3 ligase-BPD binary association rate (L/umol/h)
+koff_E3Lig_binary 	= 360     		// E3 ligase-BPD binary dissociation constant (1/h)
+kd_E3Lig_binary 	= 0.1       		// E3 ligase-BPD binary equilibrium dissociation constant (umol/L)
+kon_E3Lig_ternary 	= 3600       		// E3 ligase-BPD ternary association rate (L/umol/h)
+koff_E3Lig_ternary 	= 360    		// E3 ligase-BPD ternary equilibrium dissociation rate (1/h)
+kd_E3Lig_ternary 	= 0.1     		// E3 ligase-BPD ternary equilibrium dissociation constant
+a                	= 1			// Binding cooperativity
+ktransit_UPS		= 235			// Transit rate for UPS-mediated target protein degradation 
+n			= 3			// Number of transit compartments for UPS-mediated target protein degradation
+MTT_deg			= 0.017 		// Mean transit time for UPS-mediated target protein degradation	(h)
+fu_pl			= 0.02			// fraction unbound, plasma
+fu_ec			= 0.02			// fraction unbound, extracellular (0.2 in vitro, 0.02 in vivo)
+fu_ic			= 1			// BPD fraction unbound, intracellular
+F			= 0.5			// Bioavailability for extravascular dosing
+ka			= 0.5			// Absorption rate for extravascular dosing (1/h)
+CL			= 25			// Clearance (L/h)
+Vc			= 350  			// Volume of central compartment (L)
+Q			= 0			// Intercompartment clearance (use 1 compartment for baseline simulations) -
+Vp			= 50			// Volume of peripheral compartment (use 1 compartment for baseline simulations) 
+PS_cell 		= exp(-12)		// Permeability-surface area product for cellular permeability (L/h)
+PSV_tissue		= 10 			// Permeability-surface area product per tissue volume per tissue permeability (1/h)
+MW_BPD			= 1000			// BPD molecular weight (g/mol)
+Vtissue			= 50			// Volume of the tissue (L) 
+
+kprod_Target = 4*10^-16 //*1e8*0.6         // Target protein production rate at baseline (4*10^-16) (umol/h)
+kdeg_Target = 0.1			// Target protein degradation rate at baseline (1/h)
+Conc_Target_base = 0.001		// Target protein concentration at baseline (umol/L)
+Conc_E3Lig_base = 0.1			// E3 ligase concentration at baseline (umol/L)
+num_cells = 1e8			        // Number of cells
+Vic = 4*10^-12 //*1e8*0.6		        // Intracellular volume (L)
+Vec = 4*10^-12*1e8*0.3			// Extracellular volume (in vivo) (L)
+BW = 70					// Body Weight (kg)
+alpha = 1                               // parameter for switching extracellular concentration between fixed (alpha=0, beta = extracellular concentration, nM) and PK-driven 
+beta = 0                                // parameter for switching extracellular concentration between fixed and PK-driven (alpha = 1, beta =0)
+
+
+[ CMT ] BPD_ev BPD_c BPD_p BPD_ec BPD_ic BPD_Target BPD_E3Lig Ternary Ternary_UPS_1 Ternary_UPS_2 Ternary_UPS_3
+
+[ INIT ]
+Target = 0.001*4*10^-12// *1e8*0.6       // Conc_Target_base*Vic 
+E3Lig = 0.1*4*10^-12 //4*0.6
+
+[ ODE ]
+
+// { Pharmacokinetics }
+
+dxdt_BPD_ev = -ka * BPD_ev;
+
+dxdt_BPD_c = F* ka * BPD_ev - Q * (BPD_c/Vc - BPD_p/Vp) - CL/Vc * BPD_c;
+
+dxdt_BPD_p = Q * (BPD_c/Vc - BPD_p/Vp);
+
+
+// { Cellular Distribution }
+
+dxdt_BPD_ec = PSV_tissue * Vtissue * (fu_pl * BPD_c/Vc - fu_ec * BPD_ec/Vec) -
+        	PS_cell * num_cells*(fu_ec * BPD_ec/Vec - fu_ic * BPD_ic/Vic);
+
+dxdt_BPD_ic = PS_cell * (fu_ec * (BPD_ec/Vec)* alpha + beta - fu_ic * (BPD_ic/Vic)) -
+  kon_Target_binary * Vic * fu_ic * BPD_ic/Vic *
+	Target/Vic + koff_Target_binary * BPD_Target -
+	 kon_E3Lig_binary * Vic * fu_ic * BPD_ic/Vic * E3Lig/Vic +
+	koff_E3Lig_binary * BPD_E3Lig + kdeg_Target * BPD_Target;
+
+dxdt_Target = kdeg_Target*Conc_Target_base*Vic - kdeg_Target * Target - kon_Target_binary * Vic * fu_ic *
+		BPD_ic/Vic * Target/Vic + koff_Target_binary * BPD_Target - kon_Target_ternary *
+		Vic * BPD_E3Lig/Vic * Target/Vic + koff_Target_ternary * 
+				(Ternary + Ternary_UPS_1 + Ternary_UPS_2 + Ternary_UPS_3);
+
+dxdt_E3Lig = -kon_E3Lig_binary * Vic * fu_ic * BPD_ic/Vic * E3Lig/Vic + koff_E3Lig_binary *
+		BPD_E3Lig - kon_E3Lig_ternary * Vic * BPD_Target/Vic * E3Lig/Vic + koff_E3Lig_ternary *
+			(Ternary + Ternary_UPS_1 + Ternary_UPS_2 + Ternary_UPS_3);
+
+dxdt_BPD_Target = kon_Target_binary * Vic * fu_ic * BPD_ic/Vic * Target/Vic - koff_Target_binary *
+			BPD_Target - kon_E3Lig_ternary * Vic * BPD_Target/Vic * E3Lig/Vic +
+				koff_E3Lig_ternary * (Ternary + Ternary_UPS_1+ Ternary_UPS_2 + Ternary_UPS_3) - kdeg_Target * BPD_Target;
+
+dxdt_BPD_E3Lig = kon_E3Lig_binary * Vic * fu_ic * BPD_ic/Vic * E3Lig/Vic - koff_E3Lig_binary *
+			BPD_E3Lig - kon_Target_ternary * Vic * BPD_E3Lig/Vic * Target/Vic +
+				koff_Target_ternary * (Ternary + Ternary_UPS_1 + Ternary_UPS_2 + Ternary_UPS_3) +
+					kdeg_Target * (Ternary + Ternary_UPS_1 + Ternary_UPS_2 + Ternary_UPS_3) +
+						ktransit_UPS * Ternary_UPS_3;
+
+dxdt_Ternary = kon_Target_ternary * Vic * BPD_E3Lig/Vic * Target/Vic + kon_E3Lig_ternary * Vic *
+		BPD_Target/Vic * E3Lig/Vic - (kdeg_Target + koff_Target_ternary + koff_E3Lig_ternary + ktransit_UPS) * Ternary;
+
+
+// { Transit compartments for ubiquitination and degradation }
+
+
+dxdt_Ternary_UPS_1 = ktransit_UPS * Ternary - ( kdeg_Target + koff_Target_ternary + koff_E3Lig_ternary + ktransit_UPS) * (Ternary_UPS_1);
+
+dxdt_Ternary_UPS_2 = ktransit_UPS * Ternary_UPS_1 - (kdeg_Target + koff_Target_ternary + koff_E3Lig_ternary + ktransit_UPS) * (Ternary_UPS_2); 
+
+dxdt_Ternary_UPS_3 = ktransit_UPS * Ternary_UPS_2 - (kdeg_Target + koff_Target_ternary + koff_E3Lig_ternary + ktransit_UPS) * (Ternary_UPS_3);
+
+[ MAIN ]
+
+// {Target protein degradation}
+
+double Target_total = Target + BPD_Target + Ternary + Ternary_UPS_1 + Ternary_UPS_2 + Ternary_UPS_3;
+
+double Perc_rel_baseline = Target_total/(4e-15) * 100;
+
+double Plasma_conc = BPD_c/Vc;
+
+
+// {Steady state approximations}
+
+double Perc_target_deg_ss = (ktransit_UPS * Ternary_UPS_1/Target_total)/(kdeg_Target + ktransit_UPS * Ternary_UPS_1/Target_total) * 100;
+
+double Time_to_95_ss_target_deg = - log(0.05)/kdeg_Target * (100/(100 - Perc_target_deg_ss));
+		
+
+
+[ CAPTURE ] 
+
+Target_total 
+Perc_rel_baseline 
+Perc_target_deg_ss 
+Time_to_95_ss_target_deg 
+kd_E3Lig_ternary
+kd_Target_ternary
+kon_Target_ternary
+koff_Target_ternary 
+ktransit_UPS
+alpha
+beta
+a
+kdeg_Target
+PS_cell
+Plasma_conc
+Vic
+Vec
+Vp
+'
+```
+
+### References
+
+### Recommended Reading/Resources

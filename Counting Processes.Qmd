@@ -1,0 +1,322 @@
+---
+title: "Counting Processes"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    echo: false
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Counting Processes
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+library(tidyverse)
+library(mrgsolve)
+```
+
+## Overview
+
+A counting process is a stochastic process that produces nonnegative, integer-valued outputs. The most common use of a counting process is to count the number of occurrences of some event of interest as time goes by, and the index set is therefore usually taken to be nonnegative real numbers. The time between events is typically referred to as the **sojourn time**.
+
+## Poisson Processes
+
+A Poisson process is a stochastic process that combines the characteristics of a Poisson process and another random process, typically involving the sum of random variables. A compound Poisson process extends this idea by drawing random event magnitudes associated with each event from some other distribution. It is commonly used to model situations where events occur randomly in time and the magnitudes of those events are drawn from a certain distribution. The key features of Poisson processes are that: 1) events occur randomly and independently over time; 2) events occur one at a time; 3) the number of events within a fixed time interval follow a Poisson distribution; 4) the time between events follow an exponential distribution.
+
+Here is a simple simulation to demonstrate this type of data generating process. The time between events is exponentially distributed and the magnitudes of the events follow a Poisson distribution.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(1234)
+w <- rexp(50, 0.01) # time between events
+event <- rpois(50, 0.5) # event magnitude
+csw <- cumsum(w)
+cps <- data.frame(time = csw, event = event)
+
+cps %>%
+  ggplot(., aes(time, event)) +
+  geom_point(size=3, shape=19) +
+  theme_classic() +
+  labs(x = 'Time', y = 'Event magnitude')
+```
+
+This process may also vary with time.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(1234)
+w <- rexp(50, 0.1) # time between events
+csw <- cumsum(w)
+event <- rpois(50, 0.01*csw) # event magnitude
+cps <- data.frame(time = csw, event = event) %>%
+  mutate(cev = cumsum(event))
+
+cps %>%
+  ggplot(., aes(time, cev)) +
+  geom_point() +
+  geom_line() +
+  theme_classic() +
+  labs(x = 'Time', y = 'Cumulative Number of Events')
+```
+
+Here is some basic mrgsolve code to simulate this process. For every observation, I simulate from an exponential distribution (with the rexp() function), use the CDF of the exponential distribution to convert the random number to the 0 to 1 scale, draw from a random uniform distribution (runif) between 0 and 1, and compare the random uniform number to the CDF of the random exponential number, and if the random uniform is lower, the event time is now (i.e., if the exponential is greater than the random uniform, the wait time is in the future (right-censored)).
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+cps <- '
+$PLUGIN Rcpp
+
+$TABLE
+double ranexp = R::rexp(0.1);
+double cdf = R::pexp(ranexp, 0.1, 1, 0);
+double ranun = R::runif(0, 1);
+double event = ranun < cdf ? 1 : 0;
+double MAG = R::rpois(1*event);
+
+$CAPTURE ranexp cdf ranun event MAG
+'
+cps <- mcode('cps', cps)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+#| eval: false
+cps %>%
+  data_set(data.frame(ID=1)) %>%
+  mrgsim(end = 10000, delta=1) %>%
+  as.data.frame() %>% #view()
+  filter(MAG>0) %>%
+  mutate(wt = time-lag(time)) %>%
+  ggplot(., aes(wt)) +
+  geom_histogram()
+  #view()
+  filter(MAG>0) %>%
+  ggplot(., aes(time, MAG, group=ID)) +
+  geom_point() +
+  theme_classic()
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+cps2 <- '
+$PLUGIN Rcpp
+
+$PARAM @annotated
+TVWT  : 1/30    : typical wait time
+TVLAM : 1       : lambda poisson
+
+$OMEGA @annotated
+eLAM   : 0.09   : eta lambda (eta wait time)
+
+$MAIN @annotated
+double LAM = TVLAM*exp(eLAM);
+
+$TABLE
+double ranexp = R::rexp(LAM);
+double cdf = R::pexp(ranexp, TVLAM, 1, 0);
+double ranun = R::runif(0, 1);
+double event = ranun < cdf ? 1 : 0;
+double MAG = R::rpois(1*event);
+double CumStatus = 0; // Initialize cumulative Status sum     
+
+$CAPTURE ranexp cdf ranun event MAG TVLAM eLAM LAM 
+'
+cps2 <- mcode('cps', cps2)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+cps2 %>%
+  data_set(data.frame(ID=1:10)) %>%
+  mrgsim(end = 100, delta=1) %>%
+  #as.data.frame() %>% #view()
+  plot(MAG~time|factor(ID))
+```
+
+> "Look at a stone cutter hammering away at his rock, perhaps a hundred times without as much as a crack showing in it. Yet at the hundred-and-first blow it will split in two, and I know it was not the last blow that did it, but all that had gone before." - Jacob Riis
+
+It could be really cool to link these processes with a time to event model in which the hazard is based on the number (and magnitude) of "hits" to the system.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+cptte <- '
+$PLUGIN Rcpp
+
+$PARAM @annotated
+// counting process
+TVWT  : 1/30    : typical wait time
+TVLAM : 1       : lambda poisson
+HITEFF: 0.01    : increase in hazard with cumulative event magnitude
+
+// time to event
+TVLAM2 : 0.01  : lamba for exponential tte
+
+$CMT  @annotated
+HAZ     : hazard
+
+$ODE
+dxdt_HAZ = TVLAM2*exp(HITEFF*CUMAG); 
+
+$MAIN
+if(NEWIND <= 1) double CUMAG = 0;
+
+$TABLE
+double ranexp = R::rexp(TVWT);
+double cdf = R::pexp(ranexp, TVWT, 1, 0);
+double ranun = R::runif(0, 1);
+double event = ranun < cdf ? 1 : 0;
+double MAG = R::rpois(1*event);
+CUMAG = CUMAG + MAG;
+
+double CHAZ = HAZ;
+double SUR = exp(-CHAZ);
+double HAZNOW = TVLAM2*exp(HITEFF*CUMAG);
+
+$CAPTURE ranexp cdf ranun event MAG CUMAG SUR
+'
+cptte <- mcode('cptte', cptte)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+cptte %>%
+  ev(data.frame(ID=1)) %>%
+  mrgsim(end = 100, delta=1) %>%
+  plot(SUR+HAZ+CUMAG~time)
+```
+
+### Thinning of Poisson Processes
+
+An important extension to the basic Poisson Process is to consider that each "arrival" may be categorized according to a certain type. If we let be the total number of types, we might build a model in which the types are determined probabilistically according to a set of type probabilities. In this case, the type probabilities are said to be *time-homogeneous*.
+
+### Time-dependent thinning of Poisson Processes
+
+Alternatively, the probabilities of observing each type of category may change over time (i.e., the type probabilities are *non-homogenous* through time). This is referred to as time-dependent thining. For example, say we want to model the new lesion appearance rate in patients with metastatic disease. We also want to understand how the organ location of these new lesions (e.g., liver, lung, bone, etc) may change over time. Further, suppose that the probability of observing new lesions decays with time via a logistic decay function.
+
+$$
+p(t) = \frac{1}{1+e^{-b*(t-a)}}
+$$
+
+The $a$ parameter determines the inflection point of the logistic curve and $b$ determines the rate of change of new lesion appearance probability through time.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+# Initialize parameters
+lambda<-1
+K<- 4
+b<- -0.1
+a<- 6
+t<- 1:12
+
+# Declare p(t)
+p<-function(t,a=6,b=-0.1){
+  return(1/(1+exp(-b*(t-a))))
+  }
+
+# Declare function that assigns a random type
+assign_type<-function(t,K,a,b){
+ return(rbinom(1,K,p(t,a,b))) 
+}
+
+# Begin one replicate of simulation
+## Draw total number of arrivals 
+N<-rpois(1,lambda*t)
+## Draw the arrival times
+arrival_times<-runif(N,min=0,max=t)
+## Assign types to the arrivals
+types<-numeric()
+for(i in seq(1,N)){
+  types[i]<-assign_type(arrival_times[i],K,a,b)
+}
+
+d <- data.frame(t, N, arrival_times, types)
+```
+
+A time-dependent compound poisson process with thinning. Kind of just doing some exploration myself here.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+td_cpp_wt <- '
+$PLUGIN Rcpp base
+
+$GLOBAL
+
+$PARAM @annotated
+TVLAMWT  : 1/30    : lambda (mean wait time = 30 days)
+del      : 1E-20   : 
+
+LAM_LIV  :  0.05       :
+GAM_LIV  : 0.9   : 
+
+LAM_LUNG :  0.01  :
+GAM_LUNG :  1.2  : 
+
+LAM_BONE :  0.001  : 
+
+$OMEGA @annotated
+eLAMWT   : 0.09   : eta lambda
+
+$MAIN
+double WT = TVLAMWT*exp(eLAMWT);
+
+$TABLE
+double LIVER_LAMNOW = LAM_LIV*GAM_LIV*pow((LAM_LIV*(TIME+del)), (GAM_LIV-1));
+double LUNG_LAMNOW = LAM_LUNG*GAM_LUNG*pow((LAM_LUNG*(TIME+del)), (GAM_LUNG-1));
+double BONE_LAMNOW = LAM_BONE;
+double ranexp = R::rexp(WT);
+double cdf = R::pexp(ranexp, TVLAMWT, 1, 0);
+double ranun = R::runif(0, 1);
+double event = ranun < cdf ? 1 : 0;
+double LIVER = R::rpois(event*LIVER_LAMNOW);
+double LUNG = R::rpois(event*LUNG_LAMNOW);
+double BONE = R::rpois(event*LUNG_LAMNOW);
+
+$CAPTURE ranexp cdf ranun event TVLAMWT eLAMWT WT LIVER_LAMNOW LUNG_LAMNOW BONE_LAMNOW LIVER LUNG BONE
+'
+td_cpp_wt  <- mcode('td_cpp_wt', td_cpp_wt)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+td_cpp_wt %>%
+  data_set(data.frame(ID=1)) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(LIVER_LAMNOW~time)
+```
+
+## Renewal Processes
+
+### References

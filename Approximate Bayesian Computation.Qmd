@@ -1,0 +1,210 @@
+---
+title: "Approximate Bayesian Computation"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+bibliography: references.bib
+---
+
+## Approximate Bayesian Computation
+
+```{r}
+library(tidyverse)
+library(mrgsolve)
+library(GGally)
+```
+
+### Overview
+
+### Procedure
+
+Suppose that we want to compute the posterior probability distribution of a univariate or multivariate parameter, θ. A parameter value θi, is sampled from its prior distribution to simulate a dataset yi, for i = 1, . . . , n where n is the number of simulations. A set of summary statistics S(yi) is computed from the simulated data and compared to the summary statistics obtained from the actual data S(y0) using a distance measure d. We consider the Euclidean distance for d, where each summary statistic is standardized by a robust estimate of the standard deviation (the median absolute deviation). If d(S(yi), S(y0)) (i.e. the distance between S(yi) and S(y0)) is less than a given threshold, the parameter value θi is accepted. In order to set a threshold above which simulations are rejected, the user has to provide the tolerance rate, which is defined as the percentage of accepted simulation. The accepted θi's form a sample from an approximation of the posterior distribution. The estimation of the posterior distribution can be improved by the use of regression techniques (see below).
+
+### Algorithm
+
+1.  Sample $\theta_i\sim\pi(\theta)$ (sample parameters from a realistic parameter range).
+2.  Simulate $S_i$ (the outcome with sampled parameters) from the generative model
+3.  Apply selected summary statistics to $S_i$
+4.  Compute $d$ , the distance between the summary statistic of $S_i$ and the summary statistic from $O$ (observed data set).
+5.  Accept the sampled parameters if $d<t$ (t being a prespecified threshold); reject otherwise.
+6.  Repeat until a sufficient number of accepted parameters are generated.
+
+Let's simulate do a minimally complex example to demonstrate this procedure.
+
+```{r}
+pkmod <- '
+$PARAM @annotated
+TVKA   : 0.5 : Absorption rate constant (1/hr)
+TVF    : 0.8 : typical value bioavailability fraction (%)
+TVCL   :  8  : Clearance (volume/time)
+TVV1    : 10  : Central volume (volume)
+
+$CMT  @annotated
+ABS    : Extravascular compartment (mass)
+CENT   : Central compartment (mass)
+AUC    : cumulative AUC compartment
+
+$GLOBAL
+#define CP (CENT/TVV1)
+
+$MAIN
+F_ABS = TVF;
+
+$ODE
+dxdt_ABS   = -TVKA*ABS;
+dxdt_CENT  =  TVKA*ABS - TVCL*CP;
+dxdt_AUC  = CP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume
+TVKA : KA
+TVF  : bioavailability
+TVV1 : volume
+TVCL : clearance
+'
+
+pkmod <- mcode('pkmod', pkmod)
+```
+
+```{r}
+pkmod %>%
+  ev(amt=100, cmt=1, evid=1) %>%
+  mrgsim(end=6, delta=0.25) %>%
+  plot(CP~time)
+```
+
+Our summary metrics will be the cumulative AUC and the 6-hour trough concentration. Let's see what they are.
+
+```{r}
+pkmod %>%
+  ev(amt=100, cmt=1, evid=1) %>%
+  mrgsim(end=6, delta=0.25) %>%
+  as.data.frame() %>%
+  group_by(ID) %>%
+  mutate(Cmax=max(CP)) %>%
+  filter(time==6) %>%
+  select(Cmax, CP, AUC)
+```
+
+The Cmax was 2.28 mg/L, the trough concentration was 0.55 mg/L and the AUC was 8.8 mg\*hr/L. Now let's pretend we had no idea what parameters generated this data, but we are willing to assume it came from a one-compartment model with first order absorption. Our acceptance criteria will be of +/- 10% for each of the summary metrics.
+
+```{r}
+set.seed(1234)
+e <- data.frame(ID=1:100000, 
+                amt=100,
+                evid=1,
+                cmt=1,
+                TVKA=runif(1000000, 0, 3), 
+                TVF=runif(100000, 0, 1), 
+                TVV1=runif(100000, 5, 20),
+                TVCL=runif(100000, 1, 15))
+
+sim <- 
+  pkmod %>%
+  ev(e) %>%
+  mrgsim(end=6, delta=0.25) %>%
+  as.data.frame() %>%
+  group_by(ID) %>%
+  mutate(Cmax = max(CP)) %>%
+  filter(time==6) %>%
+  mutate(atmet = ifelse(Cmax<2.51 & Cmax>2.1 &
+                        AUC<9.7 & AUC>7.9 & 
+                          CP<0.61 & CP>0.5, 
+                        1, 0)) %>%
+  filter(atmet==1)
+```
+
+Okay, so 971 simulation replicates met our acceptance threshold for both the trough concentration and AUC. Now let's plot the PK parameters that were used in each of their
+
+```{r}
+sim %>% 
+  ungroup() %>%
+  select(TVKA, TVF, TVV1, TVCL) %>%
+  pairs()
+```
+
+```{r}
+sim %>%
+  ungroup() %>%
+  select(Cmax, CP) %>%
+  pivot_longer(., cols=everything(), names_to='param', values_to='value') %>%
+  filter(param=='AUC') %>%
+  ggplot(., aes(param, value)) +
+  geom_boxplot() +
+  theme_classic()
+```
+
+Let's hone in on each parameter to see how precise our estimates are.
+
+```{r}
+sim %>%
+  select(TVKA) %>%
+  ggplot(., aes(TVKA)) +
+  geom_density() +
+  theme_classic() +
+  geom_vline(xintercept=0.5, linetype='dashed', color='red') +
+  labs(x = 'Absorption rate (1/hr)', y = 'Probability density', main='TRUE VALUE=0.5') + theme(plot.subtitle = element_text(size = 11,
+    face = "bold", hjust = 0.5), plot.title = element_text(face = "bold",
+    hjust = 0.5)) +labs(title = "TVKA probability density",
+    subtitle = "TRUE VALUE=0.5") + theme(axis.title = element_text(face = "bold"),
+    axis.text = element_text(face = "bold"))
+```
+
+```{r}
+sim %>%
+  select(TVF) %>%
+  ggplot(., aes(TVF*100)) +
+  geom_histogram() +
+  theme_classic() +
+  geom_vline(xintercept=0.8*100, linetype='dashed', color='red') +
+  labs(x = 'Bioavailability (%)', y = 'Probability density', main='TRUE VALUE=0.5') + 
+  theme(plot.subtitle = element_text(size = 11,
+    face = "bold", hjust = 0.5), plot.title = element_text(face = "bold",
+    hjust = 0.5)) +labs(title = "TVF probability density",
+    subtitle = "TRUE VALUE=80%") + theme(axis.title = element_text(face = "bold"),
+    axis.text = element_text(face = "bold")) +
+  scale_x_continuous(limits=c(0, 100))
+```
+
+```{r}
+sim %>%
+  select(TVV1) %>%
+  ggplot(., aes(TVV1)) +
+  geom_histogram() +
+  theme_classic() +
+  geom_vline(xintercept=10, linetype='dashed', color='red') +
+  labs(x = 'Volume', y = 'Probability density') + 
+  theme(plot.subtitle = element_text(size = 11,
+    face = "bold", hjust = 0.5), plot.title = element_text(face = "bold",
+    hjust = 0.5)) +labs(title = "TVV1 probability density",
+    subtitle = "TRUE VALUE=10") + theme(axis.title = element_text(face = "bold"),
+    axis.text = element_text(face = "bold")) 
+```
+
+```{r}
+sim %>%
+  select(TVCL) %>%
+  ggplot(., aes(TVCL)) +
+  geom_histogram() +
+  theme_classic() +
+  geom_vline(xintercept=8, linetype='dashed', color='red') +
+  labs(x = 'Clearance (L/hr)', y = 'Probability density') + 
+  theme(plot.subtitle = element_text(size = 11,
+    face = "bold", hjust = 0.5), plot.title = element_text(face = "bold",
+    hjust = 0.5)) +labs(title = "TVCL probability density",
+    subtitle = "TRUE VALUE=8") + theme(axis.title = element_text(face = "bold"),
+    axis.text = element_text(face = "bold")) 
+
+```
+
+ABC is a brute force method of last-resort for estimating your model's parameters, but can be a useful place to start if your data do not support your model's complexity.

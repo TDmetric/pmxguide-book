@@ -1,0 +1,137 @@
+---
+title: "Mixture Models"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+bibliography: references.bib
+---
+
+## Mixture Models
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+library(tidyverse)
+library(mrgsolve)
+```
+
+## Overview
+
+Mixture models are a class of statistical models used for modeling data that can be thought of as a combination of multiple underlying subpopulations or distributions. In other words, mixture models are used to represent the idea that the observed data comes from a mixture of different sources or components, each with its own probability distribution. **Components or Clusters:** These are the underlying distributions that make up the mixture. Each component represents a distinct subpopulation or group within the data. For example, in a Gaussian mixture model, each component is a Gaussian (normal) distribution. **Component Weights:** These are the probabilities associated with each component. They represent the proportion of the data that comes from each component. The weights must sum up to 1.
+
+### Types
+
+| Mixture                       | Description                                                                                                                                               |
+|-------------------|-----------------------------------------------------|
+| **Gaussian Mixture Model**    | Each component is a Gaussian distribution (i.e., ETAs). These types of models are widely used for clustering and density estimation with continuous data. |
+| **Multinomial Mixture Model** | Used for discrete data, where each component follows a multinomial distribution.                                                                          |
+
+Here is a pharmacokinetic example demonstrating a mixture model. Say we have a drug in which the clearance is strongly associated with a mutation in a CYP3A4 drug-metabolizing enzyme. We haven't done any pharmacogenomic testing, but we may be able to infer the probability of the patient having the relevant mutation based on their observed drug clearance.
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+pkmix <- '
+$PROB PK mixture model
+
+$PLUGIN Rcpp
+
+$PARAM @annotated
+TVCL  : 10  :
+TVV1  :  42  :
+MUTEFF : -1.5  : effect of mutation
+
+$PARAM @annotated @covariate
+MUT   : 0    : mutation
+
+$CMT CENT
+
+$OMEGA @annotated
+eCL  : 0.09  : eta clearance
+
+$MAIN
+if(NEWIND <=1) {
+  int POP = R::rbinom(1,0.2);
+}
+
+double CL = TVCL*exp(eCL);
+double V1 = TVV1;
+
+if (POP==1) CL = TVCL*exp(MUTEFF*POP)*exp(eCL);
+
+$ODE
+dxdt_CENT = -(CL/V1)*CENT;
+
+$TABLE
+capture IPRED = CENT/V1;
+
+$CAPTURE POP
+'
+  
+pkmix <- mcode('pkmix', pkmix)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+pkmix %>%
+  ev(data.frame(ID=1:30, amt=250, cmt=1, time=0)) %>%
+  mrgsim(end = 24, delta=1) %>%
+  plot(IPRED~time|factor(POP))
+```
+
+The mixture may be composed of more than one population... **NOT DONE**
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+code <- '
+$PROB Multiple populations mixture model
+
+$PLUGIN Rcpp
+
+$PARAM @annotated
+TVBS    ;      ; baseline size
+TVKG    :      : growth rate
+TVKD    :      : death rate (drug effect)
+TVF     :       :
+P1      : 0.33 : 
+P2      :       :
+P3      :        :
+
+
+$MAIN
+if(NEWIND <=1) {
+  double mix = R::runif(0,1);
+  int POP = 1;
+  if(mixv > p1) POP = 2;
+  if(mixv > (p1+p2)) POP = 3;
+}
+
+$CAPTURE POP mixv
+'
+```
+
+::: callout-note
+Mixture models form the basis for some more complicated models such as "Cure" and "Hidden Markov Models" which are discussed in the "Frailty & Cure Models" and "Multistate Models" sections, respectively.
+:::
+
+### Summary
+
+Mixture models are often used for various applications, including clustering, density estimation, anomaly detection, and more. They are especially useful when the data is a blend of multiple underlying processes, and traditional single-distribution models like Gaussians might not capture the complexity adequately. The parameters of a mixture model are typically estimated using techniques like the Expectation-Maximization (EM) algorithm or Variational Inference.
+
+### References

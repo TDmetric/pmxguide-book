@@ -1,0 +1,186 @@
+---
+title: "Trial Designs"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Trial Designs
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+library(tidyverse)
+library(tidyverse)
+```
+
+## Overview
+
+An understa
+
+## Experimental
+
+### **Parallel Group Designs**
+
+-   In a parallel group design, participants are randomly assigned to one of two or more treatment groups.
+
+-   Each treatment group receives a different intervention (e.g., experimental treatment, placebo, standard of care).
+
+-   This design allows for direct comparison of treatment effects between different groups.
+
+-   Randomization helps control for confounding variables and distribute potential biases equally across groups.
+
+It's important to ensure that the groups are similar at baseline to ensure valid comparisons.
+
+```{mermaid}
+
+```
+
+### **Crossover Designs**
+
+-   In a crossover design, each participant receives multiple treatments sequentially in a predetermined order.
+
+-   Participants serve as their own controls, which helps reduce variability due to individual differences.
+
+-   This design is often used when the treatment effect is expected to be reversible or when short-term outcomes are of interest.
+
+```{mermaid}
+
+```
+
+### **Factorial Designs**
+
+-   In a factorial design, participants are assigned to various combinations of two or more treatments or interventions.
+
+-   This design allows for the investigation of multiple factors and their interactions simultaneously.
+
+-   It's particularly useful for studying the effects of multiple interventions or treatments in combination.
+
+```{mermaid}
+
+```
+
+### **Longitudinal Designs**
+
+-   In a longitudinal design, data is collected from participants over an extended period.
+
+-   It's useful for studying the progression of diseases, treatment effects over time, and changes in outcomes.
+
+-   Cohort studies and panel studies are examples of longitudinal designs.
+
+```{mermaid}
+
+```
+
++------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
+| Design     | Features                                                                                                                                        |
++============+=================================================================================================================================================+
+| **Panel**  | -   In a panel study, the same group of individuals is repeatedly measured or observed at different time points.                                |
+|            |                                                                                                                                                 |
+|            | -   Panel studies allow researchers to track individual trajectories and examine changes within individuals over time.                          |
+|            |                                                                                                                                                 |
+|            | -   They are well-suited for studying developmental changes, educational outcomes, and other individual-level processes.                        |
++------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
+| **Cohort** | -   Cohort studies follow a specific group (cohort) of individuals over time, observing changes in their characteristics or outcomes.           |
+|            |                                                                                                                                                 |
+|            | -   Researchers can classify cohorts as prospective (following individuals into the future) or retrospective (looking back at historical data). |
+|            |                                                                                                                                                 |
+|            | -   Cohort studies are used to study the natural progression of diseases, assess the impact of interventions, and investigate risk factors.     |
++------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
+|            |                                                                                                                                                 |
++------------+-------------------------------------------------------------------------------------------------------------------------------------------------+
+
+## Observational
+
+### **Observational Studies**
+
+Observational studies observe and collect data without directly intervening or assigning treatments. They are useful for investigating associations, identifying risk factors, and studying real-world outcomes. Common types include **case-control** studies, **cohort** studies, and **cross-sectional** studies. Use of observational studies offers a number of advantages including
+
+-   Reflect real-world conditions and diverse populations.
+
+-   Allow study of rare outcomes or exposures.
+
+-   Often cost-effective and less resource-intensive than experimental studies.
+
+-   Ethically appropriate when interventions cannot be manipulated.
+
+However, they are limited by Lack of control over exposure and potential biases.
+
+-   Difficulty establishing causality due to confounding variables.
+
+-   Potential for selection bias, recall bias, and other sources of bias.
+
+-   Difficulty in generalizing findings to broader populations.
+
+Many methods for mitigating this bias have been proposed (see Causal Inference section), but Randomized Controlled Trials will always be the gold standard.
+
+-   Random sampling to reduce selection bias.
+
+-   Matching and stratification to control for confounding variables.
+
+-   Collecting high-quality, accurate data through standardized methods.
+
+-   Using statistical techniques like regression analysis to adjust for potential biases.
+
++-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Design          | Features                                                                                                                                                        |
++=================+=================================================================================================================================================================+
+| Case-control    | -   In a case-control study, researchers identify individuals with a particular outcome (cases) and individuals without that outcome (controls).                |
+|                 |                                                                                                                                                                 |
+|                 | -   The goal is to compare the exposure history of cases and controls to identify potential risk factors or associations.                                       |
+|                 |                                                                                                                                                                 |
+|                 | -   Case-control studies are efficient for studying rare outcomes and are useful for generating hypotheses but may be prone to selection and recall biases.     |
++-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Cohort          | -   Cohort studies follow a group of individuals (a cohort) over time to observe how exposure to certain factors influences the occurrence of outcomes.         |
+|                 |                                                                                                                                                                 |
+|                 | -   Researchers can classify cohorts as prospective (starting from the present and looking into the future) or retrospective (looking back at historical data). |
+|                 |                                                                                                                                                                 |
+|                 | -   Cohort studies allow for the assessment of temporal relationships and can provide stronger evidence for causality compared to cross-sectional studies.      |
++-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Cross-sectional | -   In a cross-sectional study, data is collected from a sample of individuals at a single point in time.                                                       |
+|                 |                                                                                                                                                                 |
+|                 | -   The study aims to describe the prevalence of a condition or exposure in the study population.                                                               |
+|                 |                                                                                                                                                                 |
+|                 | -   Cross-sectional studies are useful for generating hypotheses and identifying associations between variables but cannot establish causal relationships.      |
++-----------------+-----------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+```{mermaid}
+
+```
+
+### **Non-Inferiority and Equivalence Trials**
+
+Assessing noninferiority in a trial is more complex than assessing superiority, in both the design and analysis phases. Although it is not statistically possible to prove that two treatments are identical, it is possible to determine that a new treatment is not worse than the control treatment by an acceptably small amount, with a given degree of confidence. This is the premise of a randomized, noninferiority trial. The null hypothesis in a noninferiority study states that the primary end point for the experimental treatment is worse than that for the positive control treatment by a prespecified margin, and rejection of the null hypothesis at a prespecified level of statistical significance is used to support a claim that permits a conclusion of noninferiority.
+
+-   In a non-inferiority trial, the goal is to demonstrate that a new treatment is not significantly worse than an established treatment by a predefined margin.
+
+-   In an equivalence trial, the goal is to demonstrate that two treatments are similar in efficacy and safety.
+
+-   These designs are often used when it's not ethical to use a placebo or when the new treatment is expected to have other advantages.
+
+```{mermaid}
+
+```
+
+::: callout-note
+**Biocreep**:
+:::
+
+### Adaptive Trial Designs
+
+```{mermaid}
+
+```
+
+### References

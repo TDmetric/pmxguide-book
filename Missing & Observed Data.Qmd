@@ -1,0 +1,198 @@
+---
+title: "Missing & Observed Data Mechanisms"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    echo: false
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Missing Data Patterns
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+library(tidyverse) # data wrangling
+library(mrgsolve)
+library(naniar) # exploring missing data patterns
+```
+
+### Background
+
+Imagine a fictitious world where every data set we received was 'tidy' and we had complete cases for every row in the data set. Now forget about this fantasy and get back to the real world. Missing data is a part of life and it is absolutely essential to understand the missing data patterns in your data set before you start any kind of analysis.
+
+### Types of missing data:
+
+-   Missing completely at random (MCAR)
+-   Missing at random (MAR)
+-   Missing not at random (MNAR)
+
+## Missing data/Observation mechanisms
+
+| "Missing-ness" mechanism            | Description                                                                                                                           | Example                                                                                                              |
+|------------------|-----------------------------|-------------------------|
+| Missing completely at random (MCAR) | Probability of the data observation being missing is completely independent of the longitudinal process and other observed variables. | Lab technician drops a test tube and the plasma concentration of drug for the patient cannot be quantified.          |
+| Missing at random (MAR)             | Probability of observing the data is related to an **observed** variable.                                                             | Women in the study were less likely to report weight than men.                                                       |
+| Missing not at random (MNAR)        | Probability of observing the data point is related to the value of the data itself.                                                   | Patients with severe cognitive impairment are less likely to follow up than patients with mild cognitive impairment. |
+
+We will use a simple disease progression model to demonstrate each of these concepts. This is a random intercept and random slopes model in which the treatment reduces the disease progression rate (see disease progression section if needed).
+
+```{r}
+dpmod <- '
+$PARAM @annotated
+TVDIS0   : 5    : Baseline disease status
+TVKPROG  :  1  : Disease progression rate
+TRTEFF   : -0.5 : treatment effect (log scale)
+
+$PARAM @annotated @covariates
+SEX  : 0   : 0=male; 1=female
+TRT  : 0   : 0=placebo; 1=treatment
+
+$OMEGA @annotated @block @correlation
+eDIS0   : 0.09  : eta baseline disease status
+eKPROG  : 0.3 0.09  : eta disease progression rate
+
+$MAIN
+double DIS0 = TVDIS0*exp(eDIS0);
+double KPROG = TVKPROG*exp(TRTEFF*TRT)*exp(eKPROG);
+double DIS_T = DIS0 + KPROG*TIME;
+
+$CAPTURE @annotated
+DIS_T  : Disease status at time T
+TRT    : Treatment indicator
+SEX    : SEX indicator
+'
+dpmod <- mcode("dpmod", dpmod)
+```
+
+```{r}
+dpmod %>%
+  ev(data.frame(ID=1:100, TRT=rbinom(100, 1, 0.5), 
+                SEX=rbinom(100, 1, 0.5), cmt=0)) %>%
+  mrgsim(end = 100, delta=1) %>%
+  plot(DIS_T~time|factor(TRT))
+```
+
+### Missing completely at random
+
+Data are missing for reasons that are unrelated to any characteristics or responses for the subject, including the value of the missing value, were it to be known. Examples include missing PK samples because of dropped test tube and missing outcome measures because the patient got a flat tire on the way to the clinic.
+
+```{r}
+set.seed(1234)
+
+dpmod %>%
+  ev(data.frame(ID=1:100, TRT=rbinom(100, 1, 0.5), 
+                SEX=rbinom(100, 1, 0.5), cmt=0)) %>%
+  mrgsim(end = 100, delta=10) %>%
+  as.data.frame() %>% 
+  mutate(
+    miss = rbinom(1200, 1, 0.15),
+    DIS_T = ifelse(miss==1, NA, DIS_T)
+    ) %>%
+  ggplot(., aes(time, DIS_T)) +
+  geom_miss_point()
+```
+
+### Missing at Random (MAR)
+
+This is one of the worst naming conventions in statistics. It is very easy to confuse MCAR with MAR because MAR. Data are not missing at random, but the probability that a value is missing depends on values of variables that were actually measured. An example would be older adults being less likely to present for follow up visits, men less likely to report their
+
+```{r}
+set.seed(1234)
+
+dpmod %>%
+  ev(data.frame(ID=1:100, TRT=rbinom(100, 1, 0.5), 
+                SEX=rbinom(100, 1, 0.5), cmt=0)) %>%
+  mrgsim(end = 100, delta=10) %>%
+  as.data.frame() %>% 
+  mutate(
+    miss = rbinom(1200, 1, 0.1 + 0.1*SEX),
+    DIS_T = ifelse(miss==1, NA, DIS_T)
+  ) %>%
+  ggplot(., aes(time, DIS_T)) +
+  geom_miss_point() +
+  theme_classic()
+```
+
+### Missing Not at Random (MNAR)
+
+Missing not at random (MNAR), also called "informative missing", is when the tendency for the response to be missing is a function of the response value itself. An example of this would be individuals in a trial for a weight-loss drug being less likely to report their weight if their weight is high. This is the most difficult type of missing data to handle. This can happen quite often in clinical trials when patients leave the study because they are not experiencing efficacy.
+
+```{r}
+set.seed(1234)
+
+dpmod %>%
+  ev(data.frame(ID=1:100, 
+                TRT=rbinom(100, 1, 0.5), 
+                SEX=rbinom(100, 1, 0.5), 
+                cmt=0)) %>%
+  mrgsim(end = 100, delta=10) %>%
+  as.data.frame() %>% 
+  mutate(
+    miss = rbinom(1200, 1, 0.1 + 0.01*DIS_T),
+    DIS_T = ifelse(miss==1, NA, DIS_T)
+  ) %>%
+  ggplot(., aes(time, DIS_T)) +
+  geom_miss_point() +
+  theme_classic() +
+  scale_y_continuous(limits = c(-10, 150))
+```
+
+### Exploring missing data patterns
+
+```{r}
+# load the dataset
+```
+
+Naniar is a fantastic R package for exploring the missing data patterns in your dataset. With a few key functions you can do your honest due dilligence.
+
+#### A lollipop plot
+
+#### Combinations of missing data
+
+Plot the combinations of missing values. Why do you think those combinations might be most likely to be missing? Create another version of the plot, modifying either the total number of variables used or the total number of combinations plotted.
+
+```{r}
+nhgh %>%
+  gg_miss_upset()
+```
+
+### Multiple imputation
+
+When our data is littered with missing values, there are several ways that we can handle this as mentioned previously. The most basic option is to simply drop the rows that have missing data. This could be appropriate if a small percentage of data is missing and the missing values are MCAR. Another thing we could do if we have longitudinal data is carry the last observation forward. This may be appropriate for measures like height in adults that aren't expect to change much from visit to visit. However, if we were measuring something relatively dynamic like the size of a tumor lesion, this can introdue bias. Multiple imputation is when we use other aspects of the data to impute the missing values. I know this sounds like madness, but the rationale is that we would rather give a best guess to a few values, than to throw away real information (casewise deletion). There is a lot of advanced statistical theory and debate over the most appropriate ways to do multiple imputation. Only a surface level introduction.
+
+*put this from matthew loop in quotes*
+
+> "The very heart of why statistics exists is missing data. We want information about the population, but we only have the sample. We want information about the effect a treatment would have for each person, but we are missing their outcome on the treatment they didn't receive. We want information about the whole population, not just people who responded to the survey, who might be different from those who didn't respond." - Matthew Loop, PhD
+
+### Informativeness of the observation
+
+The importance of appropriate handling of missing data is well described. What may be relatively overlooked is the informativeness of the visiting process, particularly in observational research (the healthiest and sickest patients are the ones that tend to come to the clinic). These observation mechanisms parallel the missing data mechanisms. When the presence of an observation is informative, the visiting process should be modeled in order to draw valid inferences from the model.
+
+| Mechanism                   | Description                                                                                                          |
+|------------------|------------------------------------------------------|
+| Non-informative observation | The observation at time t is independent of the outcome at time t and longitudinal data recorded up to time t.       |
+| Informative observation     | Observation time is not independent of the outcome at time t, even after conditioning on data recorded up to time t. |
+
+#### Visiting process models
+
+| Model                            | Description                                                                                                               | Example                                                                                                             |
+|------------------|----------------------------|---------------------------|
+| Examination at regular intervals | Observation times that are predefined and equal for all patients. Yields so-called *balanced panel data*.                 | Q6W follow up in a randomized controlled trial.                                                                     |
+| Random sampling                  | Sampling scheme that is not defined and independent of the longitudinal process and outcome.                              | Appointments scheduled based on the clinic and doctor's availability.                                               |
+| Doctor's care model              | Observation process that depends on the characteristics of the patient at the moment of the current doctor's examination. | Doctor specifies more frequent follow ups for a patient whose disease status has worsened since the last visit.     |
+| Patient self selection model     | Observations that are triggered by the patient themselves.                                                                | Patient chooses to visit the doctor when they feel unwell, or skip a visit when they feel the treatment is working. |
+
+The "Examination at regular intervals" and "Random sampling" models could be characterized as *observation completely at random*; The "Doctor's care" model could be characterized as *observation at random*; and the "Patient self-selection" model could be characterized as *observation not at random*. The first two models are non-informative while the third and fourth are informative. When the observations are informative, the visiting process may need to be modeled to yield unbiased inference.
+
+### References

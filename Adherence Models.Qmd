@@ -1,0 +1,359 @@
+---
+title: "Adherence Models"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    echo: false
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+bibliography: references.bib
+---
+
+# Adherence Models
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+library(tidyverse)
+library(mrgsolve)
+```
+
+### Overview
+
+Very few patients take their medication exactly as prescribed. In early phase clinical trials, study personnel often watch the patient take the medication so noncompliance not much of an issue, but in phase II/III and observational studies, drug adherence is a serious complication. Medication adherence is a very complicated issue with clinical, socioeconomic, and psychological factors of patients all influencing drug compliance [@adherenc].
+
+There are several ways to simulate adherence patterns for clinical trial simulation. Below are just a few. We'll use the following one-compartment PK model to simulate with each adherence pattern.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+pkmod <- '
+$PARAM @annotated
+TVKA   : 0.2 : Absorption rate constant (1/hr)
+TVCL   :  12  : Clearance (volume/time)
+TVV1    : 30  : Central volume (volume)
+
+$CMT  @annotated
+ABS    : Extravascular compartment (mass)
+CENT   : Central compartment (mass)
+
+$OMEGA @annotated
+eKA : 0.09  : eta KA
+eCL : 0.09  : eta CL
+eV1  : 0.09  : eta V
+
+$GLOBAL
+#define CP (CENT/V1)
+
+$MAIN
+double KA = TVKA*exp(eKA);
+double CL = TVCL*exp(eCL);
+double V1 = TVV1*exp(eV1);
+
+$ODE
+dxdt_ABS    = -KA*ABS;
+dxdt_CENT   =  KA*ABS - CL*CP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+'
+
+pkmod <- mcode("pkmod", pkmod)
+```
+
+### Resampling
+
+If you actually have adherence data from a previous study of the drug you are working with, it may be reasonable just to resample the adherence data from the actual patient population. This is sure-fire way to produce realistic adherence patterns, but is limited to the empirical (observed) distribution.
+
+### Random missing dose probability
+
+Another option is to treat each drug dosing event as a binary outcome. In this option, it i s assumed that each drug administration event is independent of the others and that the probability of missing any given dose is constant.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+# missing dose probability
+t <- 1:24
+mdp <- 0.05
+d <- data.frame(mdp, t)
+d %>%
+  ggplot(., aes(t, mdp)) +
+  geom_line() +
+  theme_classic()
+```
+
+This is a function I have used in the past to simulate random missing doses for cohorts of virtual patients.
+
+::: callout-note
+Given a list of dataframes containing patient ID's, this function may be used to add n additional doses (**addl**) to be given q**ii**h to each patients dosing profile and specify a random missing dose probability (**mdp**). Result will be a list of data frames containing the longitudinal dosing profile for each patient. For example, **rmdp(data, 24, 5, 0.1)** will simulate dose times q24h, 5 additional doses (1st dose + 5 addl), with a 10% random missing dose probability.
+:::
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+#| eval: false
+rmdp <- function(data, ii, addl, mdp) {
+  dose_times <- data.frame(time=c(ii*(0:addl)))
+  
+  df1 <- lapply(data, function(df) {
+    df1 <- df %>% 
+      group_by(ID) %>%
+      crossing(dose_times)
+    
+    return(df1)
+  })
+  
+  df2 <- lapply(df1, function(df) {
+    df2 <- df %>% 
+      # random missing dose probability
+      mutate(miss = rbinom(nrow(df), 1, mdp)) %>%
+      filter(miss<1)
+    
+    return(df2)
+  })
+}
+```
+
+Let's do something more simple for our demonstration purposes here.
+
+```{r}
+e <- 
+  data.frame(ID = 1:10, addl=19, amt=250, ii=6, cmt=1, time=0, evid=1) %>%
+  realize_addl() %>% 
+  mutate(miss = rbinom(200, 1, prob=0.2), 
+         amt = amt*(1-miss))
+```
+
+```{r}
+set.seed(1234)
+pkmod %>%
+  ev(e) %>%
+  mrgsim(end = 120, delta=1) %>%
+  plot(CP~time)
+```
+
+### Markov missing dose probability
+
+Another option is to treat each drug dosing event as dependent on the previous day's administration, which is very realistic. Thus, if patients miss their dose today, they may be more or less likely to take their dose tomorrow. An easy way to do this is to specify a 2x2 transition matrix corresponding to drug compliance based on whether or not the patient took the medication on the previous day.
+
+$$
+\begin{bmatrix}
+0.8 & 0.2\\
+0.4 & 0.6\\
+\end{bmatrix}
+$$
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+P <- t(matrix(c( 0.8, 0.2, 
+                 0.4, 0.6), 
+              nrow=2, ncol=2))
+```
+
+Here, I write a function to simulate with the transition matrix above.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+mmdpf <- function(P, ndoses) {
+  
+  # number of possible states
+  num.states <- nrow(P)
+  
+  # stores the states X_t through time
+  states  <- numeric(ndoses)
+  
+  # initialize variable for first state 
+  states[1] <- 1
+
+  for(i in 2:ndoses) {
+    
+    # probability vector to simulate next state X_{t+1}
+    prob  <- P[states[i-1], ]
+    
+    ## draw from multinomial and determine state
+    states[i] <-  which(rmultinom(1, 1, prob)== 1)
+  }
+  return(states)
+}
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+mmd <- mmdpf(P, ndoses=20) %>%
+  as.data.frame()
+colnames(mmd) <- 'state'
+
+mmd <- mmd %>%
+  mutate(time = 6*0:19,
+         dosing = ifelse(state==1, 1, 0),
+         amt = 250*(1-dosing),
+         cmt=1, 
+         evid=1)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+mmd %>%
+  ggplot(., aes(time, factor(dosing))) +
+  geom_point(size=3, shape=21) +
+  scale_y_discrete(labels = c('Missed', 'Taken')) +
+  scale_x_continuous(breaks = seq(0,120,6)) +
+  theme_classic() +
+  labs(x = 'Dose time (hr)', y=NULL)
+```
+
+```{r}
+set.seed(1234)
+pkmod %>%
+  ev(mmd) %>%
+  mrgsim(end = 120, delta=1) %>%
+  plot(CP~time)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+#| eval: false
+mmdp <- function(data, ii, addl, mdp, b) {
+  dose_times <- data.frame(time=c(ii*(0:addl)))
+  
+  df1 <- lapply(data, function(df) {
+    df1 <- df %>% 
+      group_by(ID) %>%
+      crossing(dose_times)
+    
+    return(df1)
+  })
+  
+  df2 <- lapply(df1, function(df) {
+    df2 <- df %>% 
+      # random missing dose probability
+      mutate(miss1 = rbinom(nrow(df), 1, mdp)) %>%
+      group_by(ID) %>%
+      mutate(lmiss = lag(miss1)) %>%
+      fill(lmiss, .direction = 'up') %>%
+      ungroup() %>%
+      mutate(miss2 = rbinom(nrow(df), 1, prob=mdp+b*lmiss)) %>%
+      filter(miss1<1 & miss2<1)
+    
+    return(df2)
+  })
+}
+```
+
+### Drug holidays
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+#| eval: false
+dh <- expand.grid(ID = 1:10, dose=1:12) %>% 
+  arrange(ID, dose) %>%
+  mutate(dh = rbinom(nrow(.), 1, prob=0.2),  
+         dur = ifelse(dh==1, dh+rpois(1, 1), 0)) %>%
+  group_by(ID) %>%
+  mutate(dose = ifelse(dur>0, rep(0, 1+dur)))
+         #mutate(time = dose*24 + 24*dur) %>% view()
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+#| eval: false
+dh %>%
+  filter(time<288) %>%
+  group_by(ID) %>%
+  ggplot(., aes(time, factor(ID), label=dose)) +
+  geom_text(size=3) +
+  theme_classic() +
+  scale_x_continuous(breaks = seq(0, 288, 24)) +
+  labs(x = 'Time (days)', y = 'ID')
+```
+
+### Doctor's influence
+
+Clinicians all too familiar with patients whose adherence is more of an oscillating cycle than any of the models described above. The patient tends to have poor adherence at home, they come in for a clinic visit, the clinicians has a "serious" talk with them, they improve for a bit, and then inevitably fall back into their old ways.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+di <- function(amp, period, time) {
+  prob=amp*cos(2*3.14*time/period)
+  return(plogis(prob))
+}
+
+t <- 0:720
+plot(di(0.6, 168, t)~t)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(1234)
+e <- 
+  data.frame(ID=1:5, amt=250, time=0, addl=27, ii=24, evid=1) %>%
+  realize_addl() %>% 
+  mutate(miss = rbinom(140, 1, prob=di(0.6, 168, time=time)),
+         amt = amt*(1-miss))
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+pkmod %>% 
+  ev(e) %>% 
+  mrgsim(end=672, delta=1) %>%
+  plot(CP~time)
+```
+
+### Variability in dose times
+
+Often in PK model simulations, it is assumed that a patient takes their dose exactly q24h, q12h, etc, but we all know that this never happens in the real world. Variability may be added to the dose times, to further understand the dynamics of dosing variability in real-world patients. Typically, a window must be specified for when the dosing event occurs. how the window is specified depends on whether one assumes a measure of central tendency or makes no such assumption. For example, a patient may take their dose typically right before breakfast at 7 am, give or take 30 minutes. You could specify a normal distribution for this variability, but you would inevitably get some doses simulated at 3 am because the normal distribution extends to both positive and negative infinity.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(1234)
+e <- data.frame(ID=1:5, amt=250, time=0, addl=19, ii=6, evid=1) %>%
+  realize_addl() %>%
+  mutate(time = ifelse(time>0, time+rnorm(600, 0, 1), time))
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+  pkmod %>% 
+  ev(e) %>% 
+  mrgsim(end=120, delta=1) %>%
+  plot(CP~time)
+```
+
+### References

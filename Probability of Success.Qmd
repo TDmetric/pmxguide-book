@@ -1,0 +1,49 @@
+---
+title: "Probability of Success"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Probability of Success
+
+```{r}
+library(tidyverse)
+library(mrgsolve)
+```
+
+## Overview
+
+A critical question that study sponsors always ask before investing in a clinical study is how likely the study will be successful. Traditional statistical power does not provide a reliable answer to this question -- most ph3 studies are powered at 80% or higher, but the success rate of ph3 studies is much lower than 80%. This is so because power is the probability of success (achieving statistical significance) at an assumed effect size. The assumed effect size is often based on regulatory, payer, and/or marketing requirements or needs, and may not be supported by available evidence or reflect the true treatment effect.
+
+$$
+\delta = E_{treatment}-E_{control}
+$$
+
+$$
+POS = \int Pr(study~success|\delta)*Pr(\delta|data)*d\delta
+$$
+
+The probability of study success is just the traditional statistical power at $\delta$ , the $Pr(\delta|data)$ describes the posterior distribution of the treatment effect given the available data.
+
+### Power
+
+### Probability of Technical Success
+
+### Probability of Success
+
+Probability of Success (POS)
+
+The difference lies in the fact that the PrSS accounts for the variability while the traditional power calculation assumes the point estimate is a fixed constant. T
+
+### References

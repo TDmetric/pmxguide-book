@@ -1,0 +1,173 @@
+---
+title: "Bayesian Statistics"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Bayesian Statistics
+
+```{r}
+library(tidyverse)
+library(mrgsolve)
+library(brms)
+```
+
+### Bayes Theorem
+
+### Bayesian Exposure-Response Analysis with brms
+
+Exposure-response information is at the heart of any determination of the safety and effectiveness of drugs.
+
+> "A drug can be determined to be safe and effective only when the relationship of beneficial and adverse effects to a defined exposure is known." - FDA
+
+#### Exposure
+
+Dose, Cmax, Cmin, AUC, Css
+
+Make a plot showing the different types of exposure metrics.
+
+```{mermaid}
+```
+
+When relevant, the derivation of exposure metrics should account for: (1) dose interruptions or modifications; and (2) variations in the pharmacokinetics of a drug over time due to intrinsic or extrinsic subject factors (e.g., time-varying exposure due to disease state or anti-drug antibodies for some monoclonal antibodies).
+
+#### Response
+
+-   May be efficacy or safety.
+
+-   Often a non-continuous, convenient clinical endpoint.
+
+#### Response types
+
+`{mermaid} %%| fig.width: 6.5 flowchart TD   id1[Response] --> id2[Continuous]   id1 --> id3[Binary]   id1 --> id4[Ordinal]   id1 --> id5[Count]   id1 --> id6[Proportion]   id1 --> id7[Categorical]}`
+
+### Binary Responses
+
+-   Yes/No
+
+-   Response/No-response
+
+#### Logistic Regression
+
+-   Designed for situations where the outcome variable has two categories $Y=0,1$
+
+-   Transforms the linear combination of predictor variables using the logit function (log-odds) and maps this transformation to the probability scale.
+
+-   Time of event not important.
+
+-   A proportional-odds model.
+
+$$ Probabilty = Pr $$
+
+$$ Odds = \frac{Pr}{(1-Pr)} $$
+
+$$ logit = log(\frac{Pr}{1-Pr})=log(Odds) $$
+
+To get back to the probability scale, we apply the inverse logit.
+
+$$ inverse\ logit = \frac{exp(Pr)}{(1+exp(Pr))} $$
+
+#### Model Simulation
+
+`{r} #| warning: false #| message: false #| error: false logistic <- ' $PLUGIN Rcpp  $PARAM @annotated TVRESP  :  -2   : typical value of response (logit scale) DEFF    : 0.2   : drug effect (logit scale)  $PARAM @annotated @covariates AUC     :  1    : drug exposure  $MAIN @annotated if(NEWIND <=1) {   double logit = TVRESP + DEFF*AUC;   double prob = exp(logit)/(1 + exp(logit));   int resp = R::rbinom(1, prob); }  $CAPTURE TVRESP DEFF AUC logit prob resp ' logistic <- mcode('logistic', logistic)}`
+
+`{r} #| warning: false #| message: false #| error: false set.seed(1234)  logsim<- logistic %>%   ev(data.frame(ID=1:250, cmt=0, AUC=exp(seq(0, 3, length.out=250)))) %>%   mrgsim(end=0) %>%    as.data.frame()  logsim %>%   ggplot(., aes(AUC, prob)) +   geom_point() +   theme_classic() +   scale_y_continuous(limits = c(0,1)) +   labs(x = 'Drug Exposure (AUC)', y = 'Estimated probability of response')}`
+
+#### R
+
+Fit logistic regression model using brms.
+
+```{r}
+
+```
+
+### Ordered Categorical Response
+
+#### Ordinal Regression
+
+-   Ordinal regression is used when the response variable has ordered categories that have a meaningful ranking but don't necessarily have equal intervals between them (e.g., 0, 1, 2, 3, 4 or "none", "mild", "moderate", "severe", "death").
+
+    -   No spacing assumptions are made.
+
+-   The standard (cumulative) ordinal model is an extension of logistic regression.
+
+-   Assumes observed ordinal response originates from a categorization of an unobservable (latent) continuous variable.
+
+-   If there are $k$ ordered responses ranging from 1 to 5, the model will partition these responses into $k-1$ thresholds.
+
+-   The model for the $k_3$ threshold can then be written as:
+
+$$ Pr(Y=3) = F(Y=3) - F(Y=2) - F(Y=1) $$
+
+Where $F$ is the cumulative distribution function of the standard normal distribution.
+
+Model simulation:
+
+```{r}
+```
+
+Fit the model with brms.
+
+```{r}
+```
+
+### Count/Rate Response
+
+#### Poisson Regression (Count Data)
+
+Poisson Regression is used to model the relationship between a count or frequency-based (rate) response variable and predictor variables. The Poisson distribution is characterized by non-negative integer values, a fixed rate of occurrence, and a variance that is equal to the mean. The Poisson distribution describes the probability of observing a specific number of events in a fixed interval, given a known average rate of occurrence. Poisson regression employs a log-link function to model the log of the expected count as a linear combination of predictor variables. Count data itself are often ambiguous because the risk period is unspecified. For example, it is not fair to compare someone who had three adverse events after taking a drug for a year to someone who had two adverse events after taking the drug for a week.
+
+$$ log(\lambda)=\theta_0 + \theta_1*AUC + \eta_i $$
+
+Simulate the data.
+
+```{r}
+
+```
+
+Fit the model with brms.
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+#### Poisson Regression (Rate Data)
+
+To fit this model to rate data, we'd use:
+
+$$ log(\frac{\lambda}{T})=\theta_0 + \theta_1*AUC + \eta_i $$
+
+where $T$ is the at-risk interval. The term $log(T)$ is often referred to as the "offset". Sometimes it is useful to move this term to the other side of the equation.
+
+$$ log(\lambda)=\theta_{offset}*log(T) + \theta_0 + \theta_1... $$
+
+```{r}
+```
+
+```{r}
+```
+
+### References

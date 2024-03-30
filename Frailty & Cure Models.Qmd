@@ -1,0 +1,347 @@
+---
+title: "Frailty & Cure Models"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Frailty & Cure Models
+
+::: callout-warning
+If you haven't read the time-to-event section, stop and make sure you understand those concepts before moving on to this section.
+:::
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+library(tidyverse)
+library(mrgsolve)
+```
+
+## Overview
+
+Survival models may be extended to include random effects in the model, thereby allowing each individual to have their own survival function. Frailty models are time-to-event models designed to account for unobserved heterogeneity or variability among subjects with the inclusion of random effects. Use of such models seems particularly reasonable for pharmacometricians, who want to estimate a random effect for everything.The idea is that individuals who are high-risk (more frail) will experience the event more quickly than less frail individuals even if their covariates are the same. These models are particularly useful when analyzing time-to-event data where the risk of an event occurring (such as death, failure, or recurrence) is influenced not only by observed covariates but also by unobservable individual-specific characteristics, often referred to as to as frailties. These models are advantageous when there are unobserved heterogeneity, within-group correlation, time-dependent covariates, repeated measures per subject (repeated time to event), apparent non-proportional hazards. Frailties are typically modeled as an unobserved factor that acts multiplicatitvely on the hazard. Note with this parameterization, the distribution used for the frailty must be strictly positive (hazards can't be negative) with a mean of the distribution equal to one, representing the "typical" hazard for the population. Thus, individuals with a frailty \<1 are "less frail" and individuals with a $frailty>1$ are "more frail".
+
+$$
+h(t|frailty) = frailty*h(t)
+$$
+
+$$
+S(t|frailty)=S(t)^{frailty}
+$$
+
+One effect of the frailty is to decrease the hazard over time so that typically what is seen is that the population hazard increases from $t=0$ to some maximum and then starts to decrease until it reaches zero. The actual individual hazard function cannot be observed (unless the event is reoccurring), only the population hazard can be observed. The changing mixture of frailties in a population as time marches on makes interpreting the hazard difficult because determining whether the hazard increases or decreases over time or whether the mixture of individual frailties is changing cannot be identified.
+
+### Frailty Distributions
+
+The frailty can follow various distributions such as the gamma, log-normal, exponential, inverse Gaussian, etc. The choice of distribution depends on the nature of the data and assumptions about the frailties. Let's start with a simple frailty model and then simulate with different distributions for the random effects.
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+frailty <- '
+$PROB exponential TTE model
+
+$PARAM @annotated
+LAM        : 0.0206     : rate parameter 1/LAM = mean event time
+del        : 1E-16      : prevent ODE evaluation at zero
+
+$PARAM @covariates @annotated
+FRAILTY    : 1          : frailty random effect
+
+$CMT  @annotated
+HAZ     : hazard
+
+$ODE
+dxdt_HAZ = FRAILTY*LAM;
+
+$TABLE
+double CHAZ = HAZ;
+double SUR = exp(-CHAZ);
+double HAZNOW = LAM;
+  
+$CAPTURE @annotated
+CHAZ   : cumulative hazard
+SUR    : survival probability
+HAZNOW : instantaneous hazard
+FRAILTY : frailty random effect parameter
+'
+
+frailty <- mcode('frailty', frailty)
+```
+
+#### Gamma Frailty
+
+The gamma distribution is the most commonly used frailty distribution.
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+set.seed(1234)
+e1 <- data.frame(ID=1:30, FRAILTY=rgamma(30, rate=1, shape=1))
+
+frailty %>%
+  ev(e1) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(SUR~time)
+```
+
+#### Lognormal Frailty
+
+A lognormal frailty is probably the second most commonly used distribution for frailty. One advantage to using this distribution is that it can easily be coded as a normally distributed random effect on the exponential scale (like PopPK random effects) and can then be used to estimate the covariance between bivariate outcomes (see shared frailty section below).
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+set.seed(1234)
+e2 <- data.frame(ID=1:30, FRAILTY=rlnorm(30, 1, 0.5))
+
+frailty %>%
+  ev(e1) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(SUR~time)
+```
+
+#### Inverse-Gaussian Frailty
+
+Inverse-Gaussian is also commonly used.
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+# function to simulate from inverse gaussian distribution
+simulate_inverse_gaussian <- function(n, mu, lambda) {
+  z <- rnorm(n)
+  y <- mu + (mu^2 * z^2) / (2 * lambda) - (mu / (2 * lambda)) * sqrt(4 * mu * lambda * z^2 + mu^2 * z^2)
+  return(y)
+}
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+set.seed(1234)
+e3 <- data.frame(ID=1:30, FRAILTY=simulate_inverse_gaussian(30, 1, 0.5))
+
+frailty %>%
+  ev(e1) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(SUR~time)
+```
+
+#### Frailty Selection
+
+The Cox proportional hazards model is commonly used for time-to-event analysis that assumes the hazard ratio between patients within covariate groups (e.g., TRT=1; TRT=0) remains constant over time (i.e., proportional hazards assumption). Frailty models can be used to relax the proportional hazards assumption by introducing random effects that capture changes in the hazard ratio over time. Patients who are more frail will experience the event before individuals who are less frail, therefore the average value of the frailty parameters (random effects) in the population will decrease as time marches on. This can create the illusion of non-proportional hazards for the baseline covariates. Fascinating!
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+set.seed(1234)
+e4 <- data.frame(ID=1:100, FRAILTY=exp(rnorm(100, 0, 0.5)), ran=runif(100, 0, 1))
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+sim <- 
+frailty %>%
+  ev(e4) %>%
+  mrgsim(end=100, delta=1, recover='ran') %>%
+  as.data.frame() %>%
+  group_by(ID) %>%
+  mutate(event = ifelse(SUR<ran, 1, 0),
+         csevent = cumsum(event)) %>%
+  filter(csevent<2)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+sim %>%
+  ungroup() %>%
+  group_by(time) %>%
+  summarise(meta = mean(FRAILTY),
+            veta = var(FRAILTY)) %>%
+  ggplot(., aes(time, meta)) +
+  geom_line() +
+  theme_classic() +
+  geom_hline(yintercept = c(1), linetype='dashed')  + 
+  theme(axis.title = element_text(size = 12,
+    face = "bold"), plot.title = element_text(size = 14,
+    face = "bold", hjust = 0.5)) +labs(title = "Frailty Selection", x = "Time (days)",
+    y = "Average frailty of surviving population") +
+  geom_label(label='Population typical patient', x = 75, y=1.02)
+```
+
+#### Shared Frailty
+
+Shared frailty models assume that the unobserved frailties are correlated among individuals within a group (e.g., families, hospitals, or geographic regions). Thus frailty models can be useful for situations where individuals within a group share common unobserved risk factors or for modeling bivariate time-to-event data (like in the example shown below). Here, I use the lognormal distribution for the frailty, which is the result of exponentiating a random, normally distributed variable, and induce a dependence between the two random effects with the \$OMEGA block.
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+shared_frailty <- '
+$PROB shared frailty model for bivariate event times
+
+$PARAM @annotated
+TVLAM1       : 0.0306     : rate parameter 1/LAM = mean event time
+TVLAM2       : 0.013      :
+del        : 1E-16      : prevent ODE evaluation at zero
+
+$CMT  @annotated
+HAZ1     : hazard 1
+HAZ2     : hazard 2
+
+$ODE
+dxdt_HAZ1 = LAMI1;
+dxdt_HAZ2 = LAMI2;
+
+$OMEGA @annotated @block
+eL1 : 0.09  : eta Lambda 1
+eL2 : 0.06 0.09  : eta Lambda 2
+
+$MAIN
+double LAMI1 = TVLAM1*exp(eL1);
+double LAMI2 = TVLAM2*exp(eL2);
+
+$TABLE
+double CHAZ1 = HAZ1;
+double SUR1 = exp(-CHAZ1);
+double HAZNOW1 = LAMI1;
+double CHAZ2 = HAZ2;
+double SUR2 = exp(-CHAZ2);
+double HAZNOW2 = LAMI2;
+  
+$CAPTURE @annotated
+CHAZ1   : cumulative hazard
+SUR1    : survival probability
+HAZNOW1 : instantaneous hazard
+CHAZ2   : cumulative hazard
+SUR2    : survival probability
+HAZNOW2 : instantaneous hazard
+eL1     : eta lam1
+eL2     : eta lam2
+'
+
+shared_frailty <- mcode('shared_frailty', shared_frailty)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+set.seed(1234)
+sf <- data.frame(ID=1:30)
+
+shared_frailty %>%
+  ev(sf) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(SUR1+SUR2~time)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+set.seed(1234)
+sf <- data.frame(ID=1:100)
+
+shared_frailty %>%
+  ev(sf) %>%
+  mrgsim(end=100, delta=1) %>%
+  as.data.frame() %>%
+  distinct(ID, .keep_all=TRUE) %>%
+  ggplot(., aes(eL1, eL2)) +
+  geom_point(size=2) +
+  geom_smooth(color='red') +
+  theme_classic() + 
+  scale_x_continuous(breaks = c(-0.5, 0, 0.5)) +
+  scale_y_continuous(breaks = c(-0.5, 0, 0.5)) +
+  labs(x = 'ETA TTE Outcome 1', y = 'ETA TTE Outcome 2') +
+  theme(axis.title = element_text(size = 12,
+    face = "bold"), plot.title = element_text(size = 14,
+    face = "bold", hjust = 0.5)) +labs(x = "ETA TTE Outcome 1",
+    y = "ETA TTE Outcome 2")
+```
+
+### Cure Models
+
+Cure models are used in survival analysis when a subset of the patient population cannot experience the event of interest (i.e., there is a "cured" subgroup within the population). These models are particularly relevant when studying diseases or conditions where a portion of the population is immune or resistant to the event of interest (such as recovery or recurrence of a disease), even though they are at risk of experiencing the event. Cure models often utilize mixture models, where a mixture of probability distributions is used to represent the uncured and cured subpopulations. These distributions are combined in a way that accounts for both the event occurrence and the presence of cured individuals. Simulate from the following mixture model and then plot it the data using the Kaplan-Meier method to see the survival fraction level off to a plateau. Note, that you can add covariates to the likelihood of individuals being in the "cure" fraction.
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+cure <- '
+$PROB Frailty model with cure fraction
+
+$PLUGIN Rcpp
+
+$PARAM @annotated
+TVLAM        : 0.0206     : rate parameter 1/LAM = mean event time
+del        : 1E-16      : prevent ODE evaluation at zero
+
+$CMT  @annotated
+HAZ     : hazard
+
+$OMEGA @annotated
+eLAM  : 0.09   : eta lambda
+
+$ODE
+dxdt_HAZ = LAM;
+
+$MAIN
+if(NEWIND <=1) {
+  int POP = R::rbinom(1,0.15);
+}
+
+double LAM = TVLAM*exp(eLAM);
+
+if (POP==1) LAM=0;
+
+$TABLE
+double CHAZ = HAZ;
+double SUR = exp(-CHAZ);
+double HAZNOW = LAM;
+  
+$CAPTURE @annotated
+CHAZ   : cumulative hazard
+SUR    : survival probability
+HAZNOW : instantaneous hazard
+POP    : population (0 = typical; 1 = cure)
+'
+
+cure <- mcode('cure', cure)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+cure %>%
+  ev(data.frame(ID=1:50)) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(SUR~time|factor(POP))
+```
+
+### References

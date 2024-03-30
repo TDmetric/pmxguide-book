@@ -1,0 +1,79 @@
+---
+title: "Causal Inference"
+author: "Tyler Dunlap, PharmD"
+execute: 
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    echo: false
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Fundamentals of Causal Inference
+
+```{r}
+library(tidyverse)
+library(Hmisc)
+library(rms)
+```
+
+## Overview
+
+Causal inference is a fundamental concept in statistics, epidemiology, and various scientific disciplines. It involves identifying and understanding cause-and-effect relationships between variables or events. Causal inference aims to determine whether a change in one variable directly causes a change in another variable.
+
+### Correlation versus causation
+
+Causation implies a direct relationship where changes in one variable lead to changes in another. Correlation indicates a statistical association between variables but doesn't necessarily imply causation. Counterfactuals form the basis for undertstanding causal effects by imagining what would have happened if a certain event or intervention had not occurred.
+
+### Challenges to causal effect estimation
+
+| Challenge      | Description                                                                                                                 |
+|-----------------|-------------------------------------------------------|
+| Confounding    | Uncontrolled variables that influence both the independent and dependent variables, leading to incorrect causal inferences. |
+| Selection Bias | When the process of selecting participants for a study leads to non-random treatment assignment.                            |
+| Endogeneity    | Situations where variables are jointly determined, leading to challenges in identifying causal relationships.               |
+
+### Methods
+
+| Methods                         | Description                                                                                                          |
+|-------------------|-----------------------------------------------------|
+| Matching and Propensity Score   | Methods to reduce confounding in observational studies by creating similar treatment and control groups.             |
+| Instrumental Variables          | Uses an external factor (instrument) that affects the treatment but not directly the outcome to establish causality. |
+| Regression Analysis             | Statistically controlling for potential confounding variables to estimate causal effects.                            |
+| Difference-in-Differences (DiD) | Compares changes in outcomes over time between treated and untreated groups.                                         |
+| Sensitivity Analysis            | Assessing how changes in assumptions affect the results, testing the robustness of causal conclusions.               |
+
+### Potential Outcomes Framework
+
+The potential outcomes framework, also known as the Rubin Causal Model or the Neyman-Rubin Model, is a conceptual framework used in the field of causal inference to formalize the idea of causality and to analyze the effects of treatments or interventions. It provides a rigorous and systematic approach to understanding causal relationships in observational and experimental studies. For each individual or unit, there are potential outcomes associated with each treatment status. Denoted as Y(1) for the outcome under treatment and Y(0) for the outcome under no treatment. The causal effect of a treatment for an individual is defined as the difference between their potential outcomes under the two treatment conditions: Y(1) - Y(0).
+
+### Treatment effect terminology
+
+| Terminology                                                     | Description                                                                                                                              |
+|-------------------|-----------------------------------------------------|
+| Average Treatment Effect (ATE)                                  | The average causal effect of a treatment across all individuals in the population. It's calculated as the difference between the average |
+| potential outcomes for the treated group and the control group. |                                                                                                                                          |
+| Conditional Average Treatment Effect (CATE)                     | Effect of the treatment in a given subgroup                                                                                              |
+| Marginal Treatment Effect                                       | Effect of the treatment if we treat one additional person                                                                                |
+|                                                                 |                                                                                                                                          |
+
+### Double Robust Estimators
+
+Double robust estimators are a powerful and flexible approach in causal inference and statistical analysis. They are used to estimate treatment effects while accounting for potential confounding variables and modeling errors. Double robust estimators provide robustness against model misspecification by combining two different modeling approaches to improve the accuracy of causal effect estimation.
+
+| Type                                               | Description                                                                                                                                                                    |
+|------------------------------------|------------------------------------|
+| Inverse Probability Weighting + Outcome Regression | This estimator combines inverse probability weighting (IPW) to adjust for the treatment assignment mechanism with an outcome regression model to adjust for covariate effects. |
+| Outcome Regression + Inverse Probability Weighting | This estimator combines an outcome regression model with IPW to estimate the treatment effect.                                                                                 |
+| Doubly Robust G-Estimation                         | This approach combines a generalized estimating equation (GEE) model with a doubly robust weighting approach.                                                                  |
+
+### References
+
+### Recommended Reading/Resources

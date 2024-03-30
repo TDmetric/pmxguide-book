@@ -1,0 +1,544 @@
+---
+title: "Copulas"
+author: "Tyler Dunlap, PharmD"
+execute: 
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+bibliography: references.bib
+---
+
+# Copulas
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+library(tidyverse)
+library(mrgsolve)
+library(copula)
+library(MASS)
+library(readxl)
+```
+
+## Overview
+
+A while back I read this paper by Maria Costa and Thomas Drury [@costa2018] proposing the use of copulas to model efficacy and toxicity as a multivariate response for benefit/risk assessment; and it absolutely floored me. Copulas allow one to decompose a joint probability distribution (probability density of two potentially related variables) into their marginals (which by definition have no correlation) and a function which couples (hence the name) them together. Thus, we may model the marginal distributions and dependence structure separately. Take a moment to let that sink in.
+
+In pharmacometrics, copulas may be useful for modeling the dependence structure between multiple outcomes (e.g., progression free survival and overall survival), efficacy/toxicity relationships, development of virtual patient populations, and more.
+
+Let's start with some basics and build up to the intuition behind copulas. Fasten your seat belt.
+
+### Motivation for Copulas
+
+-   We want to characterize the relationship between two or more variables.
+
+-   These variables may or may not be continuous and are probably not Gaussian.
+
+### Correlation
+
+#### Pearson's Correlation
+
+-   The correlation coefficient is a scaled version of the regression estimate. It is a measure of linear dependence.
+
+-   Correlation does not imply causation nor does it imply dependence.
+
+$$
+\rho_{X,Y} = \frac{cov(X,Y)}{\sigma_X, \sigma_Y}
+$$
+
+$$
+cov(X,Y) = E[(X-\mu_X)(Y-\mu_Y)]
+$$
+
+-   Advantages:
+
+    -   A convenient, one number summary.
+
+-   Disadvantages:
+
+    -   Many different functional relationships between two variables can lead to the same correlation coefficient.
+
+        -   In essence, the underlying data dynamics may be more complicated than the correlation coefficient is able to capture.
+
+    -   A correlation coefficient may be zero, even with [perfect dependence]{.underline} between two variables.
+
+        -   Example where perfect dependence results in a correlation coefficient of 0.
+
+#### Rank Correlation
+
+-   A measure of the degree of similarity between the ranks of the data (not the observations themselves).
+
+-   Each data is ranked from lowest to highest and a correlation on top of this data is computed. This is Spearman's correlation.
+
+-   The advantage of this is that rank correlations do not depend on the marginal distributions of the data and is invariant to monotonic transformations of the data.
+
+-   Think of the observations as emanating from an underlying dependence structure, which we are trying to capture by ranking the data.
+
+-   Two notable measures of Rank Correlation: Spearman's Rho and Kendall's Tau.
+
+### Dependence Metrics for Nonlinear Dependence
+
+-   **Mutual information**: computes the distance between the joint distribution of two variables and the independence relationship.
+
+    -   Not limited to linear dependence.
+
+    -   Based on Kullbach Leibler Divergence.
+
+    -   Fidelity based on the specific estimator used, which may be more or less desirable in various situations... There is no free lunch.
+
+    -   Hard to compare measures of dependence because there is no upper bound (i.e., if we have two data sets with two dependent variables each, if the MI is 3 for one data set and 4 for another, we can't assess the relative difference in dependence between these).
+
+### Beyond Metrics
+
+-   One number summaries are often poor measures of dependence for real-world data dynamics.
+
+-   Distributions are more flexible and capable of capturing underlying data dynamics. Distributions may be one-dimensional (univariate) or multi-dimensional (multivariate).
+
+    -   Few parametric forms for multivariate distributions (e.g., multivariate gaussian, multivariate Student t).
+
+The marginal distribution of any variable within a multivariate Gaussian distribution may be computed by integrating out the variables you don't care about.
+
+#### Multivariate Gaussian Distribution (MVD)
+
+-   Composed of multiple univariate Gaussian distribution (all marginal distributions are assumed to follow the same parametric form).
+
+-   Dependence structure captured by the correlation matrix. This a major limitation to the MVD. The dependence structure is predefined and unflexible.
+
+    -   Remember, correlation is only capable of capturing linear dependence.
+
+::: callout-note
+What if we could combine different marginal distributions with specified, potentially nonlinear, dependence structures?
+:::
+
+### Theoretical Foundations of Copulas
+
+#### Sklar's Theorem
+
+-   The main theory of copula theory.
+
+-   The joint distribution between two variables may be rewritten as a function between the variables' marginal distributions and a coupling function (C).
+
+$$
+H(x,y) = C(F(x),G(y))
+$$
+
+$$
+x = F^{-1}(u)
+$$
+
+$$
+y=G^{-1}(v)
+$$
+
+$$
+C(u,v) = H(F^{-1}(u),G^{-1}(v))
+$$
+
+The last equation may be read as: "the copula function of u and v is equal to the joint density function of the cumulative distribution functions of u and v." In this equation, u and v are uniformly random sampled variables and x and y are transformations of these uniform random samples based on the inverse cumulative distribution function of whichever marginal distributions x and y may follow.
+
+::: callout-note
+Notice, that the H(x,y) equation and C(u,v) equation are saying the same thing. The insight from this realization is that, if H(x,y) is a joint distribution function, then C(u,v) must also be a joint distribution function.
+:::
+
+#### Properties of C(u,v)
+
+-   Since u and v are uniformly distributed random variables between 0 and 1, the inputs to the C function must also be bounded between 0 and 1.
+
+-   Because C is a joint distribution function, it's marginal distributions can be found by setting the other variable to 1, which effectively integrates out the other variable.
+
+    $$
+    C(u,1)=u
+    $$
+
+    $$
+    C(1,v) = v
+    $$
+
+-   Setting one of the variables to 0, sets the probability to 0.
+
+$$
+C(u,0) = C(0,v) = 0
+$$
+
+-   **Two-increasing property:** the copula is a function that is always increasing (just like all other distribution functions), however, a copula is an at least two-dimensional distribution function, thus the copula is always increasing in two dimensions.
+
+$$
+C(u2,v2) - C(u2,v1)-C(u1,v2)+C(u1,v1)>=0
+$$
+
+#### Frechet-Hoeffding Bounds
+
+-   Tells us the range of possible dependencies that the copula can possibly model.
+
+    -   The upper bound of dependence is perfect co-monotonic dependence (the M copula):
+
+$$
+M(u,v) = min(u,v)
+$$
+
+-   The lowest bound of dependence represents perfect counter-monotonic dependence (the W copula):
+
+$$
+W(u,v) = max(u+v-1,0)
+$$
+
+-   The copula function is bounded between these two cases. Mathematically,
+
+$$
+W(u,v) <= C(u,v) <= M(u,v)
+$$
+
+-   Independence Copula
+
+    $$
+    \Pi(u,v) = u*v
+    $$
+
+#### Copula Density
+
+If you take the derivative of H(x,y) with respect to x and y and apply the chain rule...
+
+$$
+h(x,y) = c(F(x),G(y))f(x)g(y)
+$$
+
+The joint density function is equal to the copula density function as a function of its marginal distribution functions (F(x) and G(y)) and their density functions (f(x) and g(y)).
+
+### Closed Form Copulas
+
+Three copula families that are must haves for your copula toolkit:
+
+-   Gaussian copula
+
+-   Student-t copula
+
+-   Archimedian copulas
+
+#### Gaussian Copula
+
+$$
+C_R(u,v) = \phi_R(\phi^{-1}(u),\phi^{-1}(v))
+$$
+
+-   Models linear dependence between the marginal distributions. Remember, these marginal distributions do not need to be Gaussian (that is the practical difference between the Gaussian copula and the Gaussian multivariate distribution). The marginals of the Gaussian multivariate distribution must be Gaussian.
+
+-   $\phi_R$ is the multivariate Gaussian cumulative distribution function for a given correlation matrix.
+
+-   $\phi^{-1}$ is inverse of the univariate of Gaussian cumulative distribution function.
+
+-   Closed form expressions for $\phi$ and $\phi^{-1}$ do not exist but can be readily computed with numerical methods.
+
+-   The Gaussian copula is described by the correlation matrix.
+
+-   Describes symmetric dependence.
+
+#### Student-T Copula
+
+$$
+C_{\Sigma,\nu}(u,v)=t_{\Sigma,\nu}(t_{\nu}^{-1}(u),t_{\nu}^{-1}(v))  
+$$
+
+-   Described by two parameters ( $\Sigma$ and $\nu$ )
+
+-   $\nu$ describes the degrees of freedom of the Student-T distribution.
+
+-   Describes symmetric dependence.
+
+#### Archimedean Copulas
+
+-   There are many different types of Archimedean copulas. Roger B. Nelson's book, An Introduction to Copulas, lists 22 of them...
+
+-   Any copula can be described as an "Archimedean Copula" if it can be written in terms of a generator function and its pseudo-inverse generator function.
+
+$$
+C(u,v) = \phi^{[-1]}(\phi(u) + \phi(v))
+$$
+
+-   These copulas can describe asymmetric dependence structures (strengthening or weakening dependence from the left to right tails of the distribution).
+
+#### Clayton Copula
+
+-   Strong lower tail dependence. Practically, this means that events with low probabilities exhibit strong co-dependence.
+
+#### Frank Copula
+
+#### Gumbel Copula
+
+::: callout-important
+With a limited set of copula functions (Gaussian, Student-T, and basic Archimedean Copulas), a wide variety of dependence structures can be modeled. For lack of a better word, the *expressivity* of this framework with a limited number of copulas is remarkable.
+:::
+
+### Pseudo-Observations
+
+-   The realizations of u and v from the copula function are the pseudo-observations. If we plot these (e.g., with a scatter plot), we can visualize the dependence structure.
+
+-   The marginal distributions, in a sense, conceal the dependence structure.
+
+-   Can we go from the raw data to the pseudo-observations? Kind of.
+
+-   Compute the ranks of the data and normalize by the number of observations.
+
+#### Kendall's Tau
+
+$$
+\tau = 4 \int_0^1\int_0^1C(x,y)dC(x,y)dxdy
+$$
+
+Several methods can be used to fit copulas. If you *know* the copula function, there is a direct relationship between the rank correlation coefficient and the copula's parameter.
+
+For the Gaussian Copula:
+
+$$
+\rho=sin(\tau\frac{\pi}{2})
+$$
+
+For the Clayton Copula:
+
+$$
+\alpha = \frac{2\tau}{1-\tau}
+$$
+
+For the Gumbel Copula:
+
+$$
+\alpha = \frac{1}{1-\tau}
+$$
+
+### Fitting Copulas
+
+1.  How do we determine which copula to fit to our data?
+2.  How do we determine what the best parameter value of the copula is?
+3.  Algorithms that jointly select the copula and the parameter value of the copula.
+
+```{r}
+# simulate some data
+setwd("C:/Users/tcdb78/Documents/book")
+lesions <- read.csv('d.csv')
+```
+
+```{r}
+lesions <- lesions %>%
+  filter(study %in% c(264, 262, 137, 136, 114, 78)) %>%
+  filter(loc %in% c('LIVER', 'LUNG', 'LYMPH NODE', 'ABDOMEN', 'BONE')) %>%
+  group_by(id, time, loc) %>%
+  mutate(blburden = sum(size)) %>%
+  ungroup() %>%
+  dplyr::select(id, time, loc, blburden)
+```
+
+```{r}
+# only get baseline observations
+lesions <- lesions %>%
+  filter(time<=0) %>%
+  distinct(id, time, loc, .keep_all = TRUE)
+```
+
+```{r}
+lesions_wide <- lesions %>%
+  group_by(id, time) %>%
+  pivot_wider(names_from ='loc', values_from='blburden')
+```
+
+```{r}
+lesions_wide <- lesions_wide %>%
+  replace_na(list(`LIVER`=4.99, 
+                  `LYMPH NODE`=4.99, 
+                  `LUNG`=4.99,
+                  #`PERITONEUM`=4.99,
+                  #`ADRENAL`=4.99,
+                  `BONE`=4.99,
+                  #`OTHER`=4.99,
+                  #`SPLEEN`=4.99,
+                  #`COLON`=4.99,
+                  #`KIDNEY`=4.99,
+                  `ABDOMEN`=4.99))
+```
+
+To create uniform distributions from your raw data, convert each observation to its rank, and scale it by the number of observations +1. This will convert each observation to a
+
+```{r}
+d <- lesions_wide %>%
+  ungroup() %>%
+  mutate(lnr = rank(`LYMPH NODE`, ties.method='random')/(nrow(lesions_wide)+1),
+         lvr = rank(`LIVER`, ties.method='random')/(nrow(lesions_wide)+1),
+         lur = rank(`LUNG`, ties.method='random')/(nrow(lesions_wide)+1),
+         #pnr = rank(`PERITONEUM`, ties.method='random')/(nrow(lesions_wide)+1),
+         #adr = rank(`ADRENAL`, ties.method='random')/(nrow(lesions_wide)+1),
+         bnr = rank(`BONE`, ties.method='random')/(nrow(lesions_wide)+1),
+         #otr = rank(`OTHER`, ties.method='random')/(nrow(lesions_wide)+1),
+         #spr = rank(`SPLEEN`, ties.method='random')/(nrow(lesions_wide)+1),
+         #clr = rank(`COLON`, ties.method='random')/(nrow(lesions_wide)+1),
+         #kdr = rank(`KIDNEY`, ties.method='random')/(nrow(lesions_wide)+1),
+         abr = rank(`ABDOMEN`, ties.method='random')/(nrow(lesions_wide)+1))
+```
+
+```{r}
+with(d, plot(lnr~lvr))
+```
+
+```{r}
+# create a copula object
+normal_object <- normalCopula(dim=5, dispstr = 'un')
+
+fit_normal_ml <- fitCopula(normal_object, d[,8:12], method='itau')
+```
+
+```{r}
+summary(fit_normal_ml)
+```
+
+```{r}
+slotNames(fit_normal_ml)
+```
+
+```{r}
+normal_cor_matrix <- matrix(0, nrow=5, ncol=5)
+
+normal_cor_matrix[col(normal_cor_matrix)<row(normal_cor_matrix)]<-fit_normal_ml@estimate
+
+normal_cor_matrix<-normal_cor_matrix+t(normal_cor_matrix)
+diag(normal_cor_matrix)<-1
+normal_cor_matrix
+```
+
+```{r}
+estimates <- fit_normal_ml@estimate
+normal_copula_object <- normalCopula(param=estimates, dim=5, dispstr = 'un') 
+normal_copula_object
+
+pCopula(c(rep(0.99, 5)), normal_copula_object)
+```
+
+```{r}
+pCopula(c(rep(0.1, 5), fit_normal_ml))
+```
+
+### Validating Copulas
+
+-   Simulation based diagnostics?
+
+### Going beyond 2-dimensions
+
+-   Fewer parametric forms of copulas in multiple dimensions.
+
+-   Sklar's theorem is equally valid in more than two dimensions.
+
+-   As the number of dimensions grows, the amount of data you need to estimate the parameters of the copula increases exponentially.
+
+-   **Copula Bayesian Networks**
+
+-   **Vine Copulas**
+
+### Vine Copulas
+
+### Simulating from Copulas
+
+#### The Cholesky Matrix and Cholesky Decomposition
+
+-   The Cholesky matrix (C) is a special lower, triangular matrix in which multiplying it by its transpose (C') (an upper triangluar matrix) gives the correlation matrix or covariance matrix (different procedures for computing each).
+
+-   A Correlation matrix (R)
+
+-   $C$
+
+-   $C'$
+
+$$
+R = C*C'
+$$
+
+-   Why? If we have 2 series of uncorrelated random variables, we can multiply them by the Cholesky matrix to generate a bivariariate series of correlated variables.
+
+-   These are all zero mean, unit standard deviation, which is what we need to input into the copula function!
+
+### Inverse Transform Sampling
+
+Inverse transform sampling is a method for generating random numbers from any probability distribution by using its inverse cumulative distribution F−1(x). Let's say we want to generate data from an exponential distribution (and we are naive to the fact we could just use the "rexp" function). We start by generating 1,000 random samples from a uniform distribution bounded by $[0, 1]$ . We then use the inverse cumulative distribution function (or quantile function) of the exponential distribution to transform these uniformly distributed random samples to be exponentially distributed.
+
+```{r}
+set.seed(1234)
+r <- runif(1000, 0, 1)
+icdf <- qexp(r, 2)
+hist(icdf)
+```
+
+We can do the same for discrete distributions:
+
+```{r}
+set.seed(1234)
+r <- runif(1000, 0, 1)
+icdf <- qpois(r, 2)
+plot(r~icdf)
+```
+
+To get these observations back to the uniform distributions, we simply apply the cumulative distribution function
+
+```{r}
+cdf <- ppois(icdf, 2)
+hist(cdf)
+```
+
+### Gaussian Copula
+
+$$
+C_P^{Gaussian}(u) = \Phi_P(\Phi^{-1}(u_1)...,\Phi^{-1}(u_d))
+$$
+
+To build on the procedure above, we need to add correlations to our uniformly distribution marginal distributions. To do this, we simulate from a multivariate normal distribution (hence "Gaussian" copula) with the correlation structure that we want, transform the marginals to that they are uniform, then transform these marginals to whatever distribution we'd like.
+
+```{r}
+sig <- t(matrix(c(1, 0.5, 
+                  0.5, 2), 
+              nrow=2, ncol=2))
+# draw samples from multivariate normal distribution
+draw <- MASS::mvrnorm(n = 1000, mu = c(0,0), Sigma = sig)
+```
+
+```{r}
+plot(draw[,1]~draw[,2])
+```
+
+Now transform to uniform using the CDF of the normal distribution
+
+```{r}
+v1 <- pnorm(draw[,1], 0, 1)
+v2 <- pnorm(draw[,2], 0, 2)
+plot(v1~v2)
+```
+
+And transform to any distribution you want
+
+```{r}
+v1weib <- qweibull(v1, 1.2, 10)
+v2exp <- qexp(v2, 0.1)
+plot(v1weib~v2exp)
+```
+
+We can use this algorithm to generate any random vector Y = (Y1, . . . , Yd) with arbitrary marginals and Gaussian copula!
+
+### Archimedian Copulas
+
+#### Joe
+
+#### Clayton
+
+#### Gumbel
+
+### Use Cases
+
+1.  Multivariate modeling of efficacy and toxicity.
+
+2.  Multivariate modeling of disease processes with diverse longitudinal measurements (e.g, target lesion growth and new lesion appearance).
+
+3.  Generation of virtual patient populations (covariates with dependence).
+
+### References

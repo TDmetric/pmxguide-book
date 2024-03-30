@@ -1,0 +1,860 @@
+---
+title: "Generalized Linear Models"
+author: "Tyler Dunlap, PharmD"
+execute: 
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+bibliography: references.bib
+---
+
+## General & Generalized Linear Models (Discrete Outcomes)
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+library(tidyverse)
+library(mrgsolve)
+```
+
+## Overview
+
+The General Linear Model (GLM) is a versatile and widely used statistical framework that extends the linear regression model to accommodate a broad range of response variables. It's especially valuable when dealing with non-normally distributed or discrete data. The GLM extends the concept of linear regression modeling by applying a **link function** to a **systematic component** to relate the predictors and response. The systematic component relates the effects of the covariates to the expected value of the response. The link function applies applies a function to the mean of the systematic component to transform the prediction onto the appropriate response scale. Different response distributions require different link functions and some link functions may be used for a variety of response distributions.
+
+$$
+link(E(Y)) = \theta_0 + \theta_1*covariate_1 + \theta_2*covariate_2
+$$
+
+::: callout-note
+All generalized linear models have:
+
+1.  a distributional assumption.
+2.  a systematic component.
+3.  a link function.
+:::
+
+| Link        | Distribution              | Use                                                                                   |
+|----------------|----------------|-----------------------------------------|
+| Identity    | Normal                    | Estimation of a normally distributed response, such as mean change in blood pressure. |
+| Logit       | Binomial                  | Estimation of a binary response, such as 0=no response; 1=response                    |
+| Probit      | Binomial                  | Estimation of a binary response, such as 0=no response; 1=response                    |
+| Log-log     | Binomial/Extreme Value    |                                                                                       |
+| Log         | Poisson/Negative Binomial | Estimation of count data, such as number of seizures or new lesions                   |
+| Square root | Gamma                     |                                                                                       |
+| Inverse     | Inverse-gaussian          |                                                                                       |
+
+::: callout-note
+There are two types of link functions: **canonical** and **noncanonical**. Canonical link functions are unique for a particular probability density function, whereas noncanonical link functions are discretional and are not unique for a particular probability density function.
+:::
+
+::: callout-note
+When I say "generalized" linear model, I am referring to a general linear model with random effects.
+:::
+
+### Binary Responses
+
+Logistic regression is a method used to model the relationship between a binary or categorical response variable and one or more predictor variables. Such data are very common in PK/PD analyses. Logistic regression is specifically designed for situations where the outcome variable has two categories (e.g., yes/no, response/no-response, 1/0) and works by transforming the linear combination of predictor variables using the logit function (log-odds) and mapping this transformation to the probability scale. The logit transformation is the canonical link for the logistic model.
+
+::: callout-note
+The "logit" is just another name for the "log-odds"
+:::
+
+$$
+Probabilty = Pr
+$$
+
+$$
+Odds = \frac{Pr}{(1-Pr)}
+$$
+
+$$
+logit = log(\frac{Pr}{1-Pr})=log(Odds)
+$$
+
+To get back to the probability scale, we apply the inverse logit.
+
+$$
+invlogit = \frac{exp(Pr)}{(1+exp(Pr)}
+$$
+
+This code demonstrates use of logistic regression to estimate the association between drug exposure (AUC) and probability of response. Build on the complexity of this code by adding random effects to the baseline response and drug effect.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+logistic <- '
+$PLUGIN Rcpp
+
+$PARAM @annotated
+TVRESP  :  -2   : typical value of response (logit scale)
+DEFF    : 0.2   : drug effect (logit scale)
+
+$PARAM @annotated @covariates
+AUC     :  1    : drug exposure
+
+$MAIN @annotated
+if(NEWIND <=1) {
+  double logit = TVRESP + DEFF*AUC;
+  double prob = exp(logit)/(1 + exp(logit));
+  int resp = R::rbinom(1, prob);
+}
+
+$CAPTURE TVRESP DEFF AUC logit prob resp
+'
+logistic <- mcode('logistic', logistic)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(1234)
+
+logistic %>%
+  ev(data.frame(ID=1:250, cmt=0, AUC=runif(250, 0.1, 30))) %>%
+  mrgsim(end=0) %>% 
+  as.data.frame() %>%
+  ggplot(., aes(AUC, prob)) +
+  geom_point() +
+  theme_classic() +
+  scale_y_continuous(limits = c(0,1)) +
+  labs(x = 'Drug Exposure (AUC)', y = 'Estimated probability of response')
+```
+
+Some example NONMEM code.
+
+```{Verbatim}
+$PROB NONMEM - logistic regression example
+$DATA DATA.csv IGNORE=C 
+$INPUT ID DV AUC MDV
+
+$PRED
+LOGIT = THETA(1) + THETA(2)*(AUC-5)
+A = EXP(LOGIT)
+P = EXP(A) / (1 + EXP(A)) ; inverse logit
+
+IF (DV .EQ. 1) Y=P      ; If DV=1, Y is probability of resonse
+IF (DV .EQ. 0) Y=1-P     ; If DV=0, Y is probability of no response
+
+$THETA
+-1     ; THETA initial estimates on logit scale
+
+$OMEGA
+1      ; remember omega is on logit scale (use TV+ETA, not TV*exp(ETA))
+
+$ESTIMATION METHOD=COND LAPLACE LIKELIHOOD  ; must use LAPLACE
+
+$TABLE ID AUC ETA1
+```
+
+We may also estimate a longitudinal logistic regression model. This code demonstrates a model in which the probability of response is related to longitudinal drug expsoure (the cumulative AUC). To get the cumulative AUC of the drug, simply specify a compartment (I call it "AUC" below) and make it's derivative the plasma concentration ("CP" below).
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+long_logistic <- '
+$PLUGIN Rcpp
+
+$PARAM @annotated
+TVCL    : 5     : 
+TVV     : 10    : 
+TVRESP  :  -3   : typical value of response (logit scale)
+DEFF    : 0.01   : drug effect (logit scale)
+
+$CMT CENT AUC
+
+$ODE
+dxdt_CENT = -CL*CP;
+dxdt_AUC = CP;
+
+$OMEGA @annotated
+eCL : 0.09  : eta clearance
+eV  : 0.09  : eta volume
+eR  : 0.25  : eta response (logit scale)
+
+$MAIN
+double CL = TVCL*exp(eCL);
+double V = TVV*exp(eV);
+double RESP = TVRESP + eR;
+double CP = CENT/V;
+
+$TABLE 
+double CAUC = AUC;
+double logit = RESP + DEFF*CAUC;
+double prob = exp(logit)/(1 + exp(logit));
+int resp = R::rbinom(1, prob);
+
+$CAPTURE TVRESP DEFF CAUC logit prob resp
+'
+long_logistic <- mcode('long_logistic', long_logistic)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(1234)
+long_logistic %>%
+  ev(data.frame(ID=1, amt=200, ii=12, addl=3, cmt=1, evid=1)) %>%
+  mrgsim(end=100, delta=1) %>%
+  plot(CAUC+resp~time)
+```
+
+#### Probit Models
+
+Probit models use the cumulative distribution function of the standard normal distribution (the "probit" function) as the link function. This function transforms a linear combination of predictor variables into a probability between 0 and 1. The probit model looks like the equation below. The probability of $Y=1$ given covariate $X$ is equal to the CDF of $\beta*X$ .
+
+$$
+Pr(Y=1|X) = F(\beta*X)
+$$
+
+::: callout-note
+It is very important to understand the concept of cumulative distribution functions (CDF). The CDF of a distribution maps random variables from a distribution to a \[0,1\] scale representing the probability of a random draw from that distribution falling below the observed value. Play with d-, p-,q-, and r- (distribution functions in R to help understand these. These functions are your best friend.
+:::
+
+Here is a quick plot demonstrating how the CDF of the standard normal distribution maps random variables from a normal distribution, $N(1,1)$ to the $[0,1]$ interval.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+ran <- rnorm(1000, mean=1, sd=1)
+cdf <- pnorm(ran, mean=1, sd=1)
+plot(cdf~ran)
+```
+
+This code demonstrates this concept with a situation in which the treatment increases the probability of the patient achieving a clinical response.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+probit <- '
+$PLUGIN Rcpp
+
+$PARAM @annotated
+THRESH  :  -1 : threshold of clinical outcome (logit scale)
+EFF   :  1.5   : treatment effect (logit scale)
+
+$PARAM @annotated @covariates
+TRT    :  0    : treatment
+
+$OMEGA @annotated
+eDE     : 0.09   : eta for threshold
+
+$MAIN
+double thresh = THRESH + EFF*TRT; // individual threshold
+
+// MUST use 0.0, 1.0, 1, 0 for the double, double, int, int format required by Rcpp
+double prob = R::pnorm(thresh, 0.0, 1.0, 1, 0);
+
+$TABLE
+if(NEWIND <=1) double ran = R::runif(0,1);
+if(NEWIND <=1) int RESP = 0;
+
+if(TIME>0) {
+  if((ran <= prob)) RESP = 1;
+}
+
+$CAPTURE THRESH thresh TRT prob RESP
+'
+probit <- mcode('probit', probit)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(1234)
+probit %>%
+  ev(data.frame(ID=1:100, cmt=0, 
+                TRT=sample(c(0,1), 100, replace=TRUE, prob=c(0.5, 0.5)))) %>%
+  mrgsim(end=1, delta=1) %>%
+  as.data.frame() %>%
+  group_by(TRT) %>% 
+  summarise(n = n(), s = sum(RESP), prop = s/n)
+```
+
+### Ordered Categorical Responses
+
+Ordinal Regression, also known as "Ordered Logistic Regression" or "Ordinal Logit Model", is a statistical method used to model and analyze relationships between ordinal categorical response variables and predictor variables. The standard (cumulative) ordinal model is an extension of logistic regression that's tailored to situations where the outcome variable has ordered categories. Ordinal regression is used when the response variable has ordered categories that have a meaningful ranking but don't necessarily have equal intervals between them. Examples include adverse drug reactions with a graded response of "none", "mild," "moderate," "severe," "death." The standard ordinal regression uses a **cumulative logit model** (which goes by many names), where the cumulative probabilities of being in or below a certain category are modeled using a cumulative log link function.
+
+#### Cumulative Ordinal Model
+
+The cumulative ordinal model assumes that the observed ordinal response originates from the categorization of an unobservable (latent) continuous variable. If there are $k$ ordered responses ranging from 1 to 5, the model will partition these responses into $k-1$ thresholds. The model for the $k_3$ threshold can then be written as:
+
+$$
+Pr(Y=3) = F(Y=3) - F(Y=2) - F(Y=1)
+$$
+
+Here is an example where a drug effect increases the probability of the patient experiencing adverse effect thresholds. The thresholds (0, 1, 2, 3) are on the logit scale and the drug exerts a linear effect that reduces the individual patient's threshold for experiencing each of the adverse effect levels. The cumulative distribution function of the standard normal distribution (pnorm in the example below) is used to convert the individual's thresholds into probabilities. Next, a random number on the interval \[0,1\] is drawn for each individual and compared to the cumulative probabilities of each of the thresholds.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+ordinal <- '
+$PLUGIN Rcpp
+
+$PARAM @annotated
+THRESH1  :  0   : threshold 1 (logit scale)
+THRESH2  :  1   : theshold 2 (logit scale)
+THRESH3  :  2   : threshold 3 (logit scale)
+THRESH4  :  3  : theshold 4 (logit scale)
+TVDEFF    : 0.2   : drug effect (logit scale)
+
+$PARAM @annotated @covariates
+AUC     :  1    : drug exposure
+
+$OMEGA @annotated
+eDE     : 0.09   : eta for drug effect
+
+$MAIN
+double DEFF = TVDEFF*exp(eDE); // individual drug effect
+
+double thresh1 = THRESH1 - DEFF*AUC;
+double thresh2 = THRESH2 - DEFF*AUC;
+double thresh3 = THRESH3 - DEFF*AUC;
+double thresh4 = THRESH4 - DEFF*AUC;
+
+// MUST use 0.0, 1.0, 1, 0 for the double, double, int, int format required by Rcpp
+double prob1 = R::pnorm(thresh1, 0.0, 1.0, 1, 0);
+double prob2 = R::pnorm(thresh2, 0.0, 1.0, 1, 0);
+double prob3 = R::pnorm(thresh3, 0.0, 1.0, 1, 0);
+double prob4 = R::pnorm(thresh4, 0.0, 1.0, 1, 0);
+  
+double CUP1 = prob1;
+double CUP2 = prob1+prob2;
+double CUP3 = prob1+prob2+prob3;
+double CUP4 = prob1+prob2+prob3+prob4;
+
+$TABLE
+if(NEWIND <=1) double ran = R::runif(0,1);
+if(NEWIND <=1) int RESP = 0;
+
+if(TIME>0) {
+  //if(ran < CUP1) RESP = 0;
+  if((ran >= CUP1) & (ran < CUP2)) RESP = 1;
+  if((ran >= CUP2) & (ran < CUP3)) RESP = 2;
+  if((ran >= CUP3) & (ran < CUP4)) RESP = 3;
+  if(ran >= CUP4) RESP = 4;
+}
+
+$CAPTURE TVDEFF AUC eDE ran prob1 prob2 prob3 prob4 CUP1 CUP2 CUP3 CUP4 RESP
+'
+ordinal <- mcode('ordinal', ordinal)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(123)
+ordinal %>%
+  ev(data.frame(ID=1:100, cmt=0, AUC=runif(100, 0, 15))) %>%
+  zero_re() %>%
+  mrgsim(end=1) %>%
+  as.data.frame() %>%
+  group_by(ID) %>%
+  slice_tail() %>%
+  ggplot(., aes(RESP)) +
+  geom_bar() +
+  theme_classic() +
+  scale_x_continuous(breaks = c(0,1,2,3,4), limits=c(-1, 5))
+```
+
+::: callout-important
+**Proportional Odds Assumption:** An assumption of standard ordinal regression is the proportional odds assumption, which states that the odds ratios for each pair of adjacent categories remain constant across different levels of predictor variables. In other words, proportional odds models assume the effect of the predictor variable is the same across all thresholds. This assumption is maintained in the example above by the drug influencing all of the thresholds equally. If the drug were to reduce thresholds 1 and 2, but not 3 and 4, proportional odds would not be maintained.
+:::
+
+| Extension                     | Description                                                                                                                      |
+|------------------|------------------------------------------------------|
+| Continuation Ratio Model      | An alternative to the proportional odds model, where the odds ratios are allowed to vary for each level of the ordinal response. |
+| Adjacent Category Logit Model | Relaxing the proportional odds assumption to allow for different relationships between adjacent categories.                      |
+
+#### Continuation Ratio Model
+
+For many ordinal variables, the assumption of a single underlying continuous variable, as in cumulative models, may not be appropriate. If the response can be understood as being the result of a sequential process, such that a higher response category is possible only after all lower categories are achieved, this model may be more appropriate. For example, a patient may only fail third line treatment after failing first and second line treatments. The duration of treatment---the ordinal dependent variable---may be thought of as resulting from a sequential process.
+
+In the continuation ratio model, the outcomes in any given category are compared to those in higher categories. The idea here is to model the probability of being in a higher category given that the subject was already in a lower category. With the continuation ratio model, what is being modeled are the conditional probabilities rather than cumulative probabilities.
+
+$$
+Pr(Y=3) = F(Y=3)*(1-F(Y=2))*(1-F(Y=1))
+$$
+
+In other words, if we want to know the probability a patient experiences $Y=3$ we multiply the probability of Y=3 by the probabilities that Y is not less than 3 (Y=2 and Y=1) to obtain the conditional probability. Here is some code demonstrating this model simulating a hypothetical example where interest is in the number of free pharmacy student led diabetes screening checkups a patient will attend before ceasing to attend. Note that because the thresholds refer to different latent variables, they do not need to be ordered.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+cr <- '
+$PLUGIN Rcpp
+
+$PARAM @annotated
+THRESH1  :  -1   : threshold 1 (logit scale)
+THRESH2  :  -2   : theshold 2 (logit scale)
+THRESH3  :  -1.5   : threshold 3 (logit scale)
+
+$MAIN
+// MUST use 0.0, 1.0, 1, 0 for the double, double, int, int format required by Rcpp
+double prob1 = R::pnorm(THRESH1, 0.0, 1.0, 1, 0);
+double prob2 = R::pnorm(THRESH2, 0.0, 1.0, 1, 0);
+double prob3 = R::pnorm(THRESH3, 0.0, 1.0, 1, 0);
+  
+double T1 = prob1;
+double T2 = prob2*(1-prob1);
+double T3 = prob3*(1-prob2)*(1-prob1);
+
+$TABLE
+if(NEWIND <=1) double ran = R::runif(0,1);
+
+$CAPTURE ran prob1 prob2 prob3 T1 T2 T3
+'
+cr <- mcode('cr', cr)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+cr %>%
+  ev(data.frame(ID=1:5, cmt=0)) %>%
+  mrgsim(end=0) %>% 
+  as.data.frame() %>% view()
+```
+
+#### Adjacent Category Logit Model
+
+In this class of models, the logit transform compares the probability of being in the ith category to the probability of being in the next higher category.
+
+$$
+log(\frac{Pr_1}{Pr_2})=F(x)
+$$
+
+### Count/Rate Responses
+
+#### Poisson Regression
+
+Poisson Regression is used to model the relationship between a count or frequency-based (rate) response variable and predictor variables. The Poisson distribution is characterized by non-negative integer values, a fixed rate of occurrence, and a variance that is equal to the mean. The Poisson distribution describes the probability of observing a specific number of events in a fixed interval, given a known average rate of occurrence. Poisson regression employs a log-link function to model the log of the expected count as a linear combination of predictor variables. Count data itself are often ambiguous because the risk period is unspecified. For example, it is not fair to compare someone who had three adverse events after taking a drug for a year to someone who had two adverse events after taking the drug for a week.
+
+$$
+log(\lambda)=\theta_0 + \theta_1*AUC + \eta_i
+$$
+
+To fit this model to rate data, we'd use:
+
+$$
+log(\frac{\lambda}{T})=\theta_0 + \theta_1*AUC + \eta_i
+$$
+
+where $T$ is the at-risk interval. The term $log(T)$ is often referred to as the "offset". Sometimes it is useful to move this term to the other side of the equation.
+
+$$
+log(\lambda)=\theta_{offset}*log(T) + \theta_0 + \theta_1...
+$$
+
+::: callout-important
+If you use this parameterization, remember to fix the $\theta_{offset}$ to 1.
+:::
+
+::: callout-important
+Poisson regression assumes that the variance of the counts is equal to the mean (equidispersion). If this assumption is violated, the data are said to be overdispersed (see negative binomial below).
+:::
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+pois <- '
+$PLUGIN Rcpp
+
+$PARAM @annotated
+TVLAM : 1    : Lambda for Poisson process
+
+$OMEGA @annotated
+eLAM   : 0.09 : eta lambda
+
+$MAIN @annotated
+double lam = TVLAM*exp(eLAM);
+
+$TABLE
+double count = R::rpois(lam);
+
+$CAPTURE TVLAM eLAM lam count
+'
+pois <- mcode('pois', pois)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(123)
+pois %>%
+  ev(data.frame(ID=1:100, cmt=0)) %>%
+  mrgsim(end=0) %>%
+  as.data.frame() %>%
+  ggplot(., aes(factor(count))) +
+  geom_histogram(stat='count', fill='white', color='black') +
+  theme_classic() +
+  labs(x = 'Response', y = '# of individuals')
+```
+
+::: callout-important
+**Sterling's formula**: If you've ever seen equations for count data, you've likely seen "!" in the equation. The ! is the factorial is a mathematical operation that represents the product of all positive integers from 1 up to a given non-negative integer. The factorial of a non-negative integer "n" is denoted by "n!" and is calculated as follows:
+
+Sterling's formula can be used to approximate a factorial as follows:
+
+$$
+n!\sim \sqrt{2\pi n}\frac{n}{e}^n
+$$
+
+for n = 1,2,3,4,5...
+:::
+
+To do a Poisson regression in NONMEM, the factorial must be coded into the dataset (FACT).
+
+```{Verbatim}
+$PROB NONMEM - Poisson example
+$INPUT C ID DV FACT
+$DATA data.csv 
+
+$PRED
+TVLM=THETA(1)       ;Typical value of log(lambda)
+LLM=TLLM+ETA(1)       ;
+LM=EXP(LLM)
+POIS=(LM**DV)*DEXP(-LM)/FACT 
+Y=POIS
+
+$THETA 
+(0,1,5) ; THETA TVLAM
+
+$OMEGA 
+0.01 ; ETA LAM
+
+$ESTM NOABORT PRINT=5 MAXEVAL=9999 METHOD=1 LAPLACE LIKELIHOOD 
+$TABLE ID LM POIS DV Y ONEHEADER NOPRINT
+```
+
+#### Negative Binomial Regression
+
+The Negative Binomial Distribution is another distribution that can be used to model count-based data. It extends the Poisson distribution with an extra shape parameter that models the dispersion of the data (i.e., use this instead of Poisson when your data are overdispersed). Formally, this is when the variance of the data is greater than the mean.
+
+::: callout-note
+The negative binomial (NB) distribution can be thought of in different ways. For example, we can think of it as a series of Bernoulli trials with probability of success $\frac{\beta}{(1+\beta)}$ . The number of failures, $y$ before $alpha$ successes is NB distributed. We can also considered the NB as a Poisson-gamma mixture distribution where the conditional response can be modeled as Poisson but the mean can be modeled as a gamma distribution. For example, if we draw a value from a $\gamma$ distribution, with parameters $\alpha$ and $\beta$ , and then use this value as the mean of our Poisson distribution, $\lambda$ , the resulting mixture will be NB distributed.
+:::
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+#| eval: false
+nb <- '
+$PLUGIN Rcpp
+
+$PARAM @annotated
+TVLAM : 1    : typical value for count rate (mean)
+TVSH : 2       : 
+
+$OMEGA @annotated
+eLAM   : 0.09 : eta rate
+eSH    : 0.09 : eta shape
+
+$MAIN @annotated
+double lam = TVLAM*exp(eLAM);
+double sh = TVSH*exp(eSH);
+
+$TABLE
+double count = R::rnbinom(sh, );
+
+$CAPTURE TVLAM TVSH eLAM eSH lam sh count
+'
+nb <- mcode('nb', nb)
+```
+
+The gamma-Poisson mixture:
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+nb2 <- '
+$PLUGIN Rcpp
+
+$PARAM @annotated
+alpha : 1       : shape
+beta  : 2       : rate
+
+$TABLE
+if(NEWIND <=1) double gamma = R::rgamma(alpha, beta);
+double count = R::rpois(gamma);
+
+$CAPTURE gamma count
+'
+nb2 <- mcode('nb2', nb2)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+set.seed(1234)
+nb2 %>%
+  ev(data.frame(ID=1:1000, cmt=0)) %>%
+  mrgsim(end=0) %>%
+  as.data.frame() %>%
+  distinct(ID, .keep_all=TRUE) %>%
+  ggplot(., aes(count)) +
+  geom_histogram() +
+  theme_classic() +
+  labs(x = 'Count', y = '# of individuals')
+```
+
+### Zero-inflated Models
+
+One issue that may arise in the analysis of count data, is excess zeros, or so-called "zero-inflation". The excess zeros may be due to structural or sampling zeros. In other words, the zeros may be genuine (e.g., truly no response) or artificial due to a separate process concealing the true observation. Zero-inflated models are a way to handle this situation. The model essentially combines two submodels: one that models the probability of observing a response and another that models the non-zero values. In essence, the zero-inflated Poisson model combines a logistic regression for the probability of observing a response or not and a Poisson model for the outcome if a response is observed.
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+zip <- '
+$PLUGIN Rcpp
+
+$PARAM @annotated
+TVZI  :  -1   : typical value for zero inflation probability
+TVLAM : 1    : Lambda for Poisson process
+
+$OMEGA @annotated
+eTVZI  : 0.5  : eta zero inflation process (logit scale)
+eLAM   : 0.09 : eta lambda
+
+$MAIN @annotated
+double zi = TVZI + eTVZI;
+double lam = TVLAM*exp(eLAM);
+
+$TABLE
+double zeroprob = exp(zi)/(1+exp(zi));
+double respprob = 1 - zeroprob;
+double resp = R::rbinom(1, respprob);
+double pois = resp*R::rpois(lam);
+
+$CAPTURE TVZI TVLAM eTVZI eLAM zi lam zeroprob respprob resp pois
+'
+zip <- mcode('zip', zip)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+zip %>%
+  ev(data.frame(ID=1:10, cmt=0)) %>%
+  mrgsim(end=0)
+```
+
+Zero-inflated model implemented in NONMEM.
+
+```{Verbatim}
+$PROB Zero-inflated Poisson
+$INPUT C,ID,DV,FACT
+$DATA DATA.csv 
+
+$PRED
+; logistic
+LZIP=THETA(1) ;logit for zip process
+ILZIP=EXP(LZIP)/(1+EXP(LZIP))
+LOGIT=TLOGIT + ETA(1)
+PHI=EXP(LOGIT)/(1+EXP(LOGIT)) ;Individual Probability
+
+; Poisson
+TVLL=THETA(2)
+LLM=TLLM+ETA(2)
+LM=EXP(LLM)
+POIS=(LM**DV)*DEXP(-LM)/FACT
+
+STATE=0
+IF (DV.EQ.0) STATE=1
+
+P0=PHI+(1-PHI)*EXP(-LM) ;Probability of zero count
+PN=(1-PHI)*POIS ;Probability of count
+
+ZIP=P0**STATE*PN**(1-STATE) 
+Y=ZIP
+
+EYI=(1-PHI)*LM 
+VYI=EYI+EYI*(LM-EYI)
+
+$THETA 
+(-8,-0.6,8) 
+(0,2.2) 
+
+$OMEGA 0.3 0.4
+
+$ESTM NOABORT PRINT=5 MAXEVAL=9999 METHOD=1 LAPLACE LIKELIHOOD
+
+$TABLE ID DV PHI PN ZIP ETA1 ETA2 
+```
+
+### Proportions
+
+#### Beta Regression
+
+Beta Regression is a flexible modeling approach used for analyzing data that are bounded within the interval \[0, 1\]. It's particularly useful for response variables that represent proportions, percentages, or rates. Beta regression is designed to handle data with heteroscedasticity and overdispersion, which are common in situations where values are constrained between 0 and 1. The beta distribution has two shape parameters that influence the distribution's shape, an $alpha$ and $beta$ and different relationships between these shape parameters can fit different shapes of the observed data. The canonical link for the beta distribution is the logit transformation.
+
+::: callout-note
+The beta distribution is:
+
+1.  **Symmetric:** When $\alpha=\beta$, the distribution is symmetric around its mean.
+
+2.  **Skewed:** When $\alpha\ne\beta$, the distribution is skewed towards the side with the higher shape parameter.
+
+3.  **U-Shaped:** When $alpha<1$ and $\beta<1$ the distribution is U-shaped, with modes at the endpoints (0 and 1).
+
+4.  **J-Shaped:** When one of $\alpha$ or $\beta$ is $<1$ and the other is $>1$ , the distribution is J-shaped, with a mode away from the endpoints.
+:::
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+# beta distribution simulation
+bet <- '
+$PLUGIN Rcpp
+
+$PARAM @annotated
+TVSH1  : 1    : 
+TVSH2  : 3    :
+
+$OMEGA @annotated
+eSH1   : 0.09   : eta shape1
+
+$MAIN @annotated
+double sh1 = TVSH1*exp(eSH1);
+double sh2 = TVSH2;
+
+$TABLE
+if(NEWIND <=1) double prop = R::rbeta(sh1, TVSH2);
+
+$CAPTURE prop TVSH1 eSH1 sh1 sh2
+'
+bet <- mcode('bet', bet)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| error: false
+bet %>%
+  ev(data.frame(ID=1:1000, cmt=0)) %>%
+  mrgsim(end = 0) %>%
+  as.data.frame() %>%
+  distinct(ID, .keep_all=TRUE) %>%
+  ggplot(., aes(prop)) +
+  geom_histogram(fill='white', color='black') +
+  theme_classic()
+```
+
+```{Verbatim}
+$PROB Beta
+$ABBR FUNCTION BETACDF(VQI,10)
+$ABBR VECTOR VQI2(10)
+
+$INPUT ID STDY TRT TIME PTIM DV EVID MDV AMT CMT KA V K10
+$DATA data.csv
+
+$SUB ADVAN13 TOL=10
+$MODEL NCOMP=3 COMP=(DEPOT) COMP=(PLASMA) COMP=(INDIR)
+
+$PK     
+
+PhiBeta = THETA(1)
+MU_1 = LOG(THETA(2)/(1-THETA(2)))
+BSlgt = MU_1 + ETA(1)
+PBMX = THETA(3)
+PBRATE = THETA(4)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;PD - Indirrect ;;;;;;;;;;;;;;;;;;;;;;;;
+MU_2 = LOG(THETA(5))
+KOUT = EXP(MU_2 + ETA(2))
+EC50 = THETA(6)                 
+MU_3 = LOG(THETA(7))
+DE = EXP(MU_3 + ETA(3))  ; Drug effect 
+
+A_0(3)= 1
+
+
+$DES
+DADT(1)= -KA*A(1)                       
+DADT(2)= KA*A(1)-K10*A(2)           ; plasma
+CE = A(2)/V                  ; plasma concentration
+IH = CE/(CE+EC50)     ; inhibition 
+DADT(3) = KOUT*(1-IH- A(3))
+
+
+$ERROR
+MuBlgt = BSlgt - PBMX*(1-EXP(-PBRATE*TIME)) - DE*(1-F)
+MuBeta = 1/(1 + EXP(-MuBlgt))
+ALPHA = MuBeta*PhiBeta
+BETAq = (1 - MuBeta)*PhiBeta
+
+VQI(1)=DV*10/721
+VQI(2)=ALPHA
+VQI(3)=BETAq
+CDFk = BETACDF(VQI)
+VQI2(1)=(DV*10+1)/721
+VQI2(2)=ALPHA
+VQI2(3)=BETAq
+CDFk1 = BETACDF(VQI2)
+;Y = CDFk1 - CDFk
+TEMP = CDFk1 - CDFk
+IF(TEMP.LT.1.E-30) TEMP=1.E-30
+Y = TEMP
+
+$THETA 
+(0.1, 11)              ;1 PhiBeta 
+(0.1, 0.28, 1)         ;2 BS MuBeta
+(0.1, 0.367, 0.9)      ;3 PBMX 
+(0.001, 0.0193, 1)     ;4 PBRATE 
+(0.001, 0.0192, 0.5)   ;5 KOUT
+(0.001, 0.0702, 0.5)   ;6 EC50 
+(0.1, 3)               ;7  DE
+
+$OMEGA 0.4
+
+$OMEGA BLOCK(2)
+0.1
+0.01 0.1
+
+$EST MAX=9999 NOABORT SIGL=9 SIG=3 METHOD=SAEM LAPLACE NUM LIKE PRINT=100
+$EST NOABORT SIGL=9 SIG=3 METHOD=IMP LAPLACE NUM LIKE ISAMPLE=1000 NITER=10 EONLY=1 PRINT=1
+$COV UNCOND COMPRESS PRINT=E
+```
+
+### Categorical Outcomes
+
+#### Multinomial Regression
+
+Multinomial Models, also known as Multinomial Logistic Regression or Multinomial Logit Models, are statistical methods used to model and analyze relationships involving categorical response variables with more than two categories. Unlike binary logistic regression, which handles binary outcomes, multinomial models are designed for situations where the outcome variable has three or more unordered categories. Multinomial models are employed when the response variable has multiple unordered categories that do not have a natural numerical ordering. The multinomial distribution describes the probability distribution of observing outcomes across multiple categories in a single trial. Multinomial models use a log-link function to model the log-odds of the probability of each category relative to a reference category. The interpretation of coefficient estimates depends on the choice of the reference category, which can influence the model's overall understanding.
+
+::: callout-note
+Since the rmultinom() returns a matrix of responses, I'm not sure how to use this within mrgsolve yet. Hopefully, I'll figure it out soon and come back to this.
+:::
+
+#### Exploded-logit models
+
+The Exploded Logit Model, also known as the Discrete-Continuous Choice Model or the Discrete/Continuous Model, is a model that combines elements of multinomial logistic regression (discrete choice) and linear regression. It's used in situations where individuals simultaneously make discrete and continuous choices that are interrelated. The discrete and continuous choices may be interdependent, where the discrete choice influences the continuous choice or vice versa. An example of where this could be used in pharmacometrics, is an analysis of how patient's choose treatment options given their probability of success and cost. I haven't seen any examples of this model being used in pharmacometrics, but they may be out there, particularly in the pharmaco-economics literature.
+
+### References

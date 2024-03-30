@@ -1,0 +1,59 @@
+project:
+  type: book
+  output-dir: docs
+
+book:
+  title: "A Student's Guide to Pharmacometrics"
+  author: "Tyler Dunlap"
+  date: "3/30/2024"
+  chapters:
+    - index.qmd
+    - intro.qmd
+    - Mixed Effects Modeling.qmd
+    - Covariate Selection Methods.qmd
+    - Estimation methods.qmd
+    - Pharmacokinetic Models.qmd
+    - Pharmacodynamic Models.qmd
+    - Generalized Linear Models (Discrete Outcomes).qmd
+    - Disease Progression Models.qmd
+    - Target Mediated Drug Disposition.qmd
+    - Trial Designs.qmd
+    - Bayesian Sequential Designs.qmd
+    - Time to Event Models.qmd
+    - Frailty & Cure Models.qmd
+    - Tumor Growth Models.qmd
+    - Mixture Models.qmd
+    - Clinical Trial Simulation.qmd
+    - Virtual Patient Populations.qmd
+    - Probability of Success.qmd
+    - Risk Benefit Assessment.qmd
+    - Decision Theory Basics.qmd
+    - Optimal Design.qmd
+    - Causal Inference.qmd
+    - Bayesian Statistics.qmd
+    - Approximate Bayesian Computation.Qmd
+    - PBPK Models.qmd
+    - Joint models.qmd
+    - Multistate Models.qmd
+    - Counting processes.qmd
+    - Latent variables.qmd
+    - Copulas.qmd
+    - Quantitative Systems Pharmacology.qmd
+    - summary.qmd
+    - references.qmd
+
+bibliography: references.bib
+
+format:
+  html:
+    theme: journal
+    mainfont: arial
+    fontsize: 1rem
+    #fontcolor:
+    #linkcolor:
+    #monofont:
+    css: styles.css
+    toc: true
+
+editor: visual
+

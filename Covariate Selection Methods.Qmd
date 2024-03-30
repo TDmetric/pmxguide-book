@@ -1,0 +1,89 @@
+---
+title: "Covariate Selection Methods"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    echo: false
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Covariate Selection Methods
+
+```{r}
+library(tidyverse)
+```
+
+#### Covariates
+
+Identification of covariates that are predictive of pharmacokinetic variability is important in population pharmacokinetic evaluations. A general approach is outlined below:
+
+Selection of potential covariates: This is usually based on known properties of the drug, drug class, or physiology. For example, highly metabolized drugs will frequently include covariates such as weight, liver enzymes, and genotype (if available and relevant). Preliminary evaluation of covariates: Because run times can sometimes be extensive, it is often necessary to limit the number of covariates evaluated in the model. Covariate screening using regression-based techniques, generalized additive models, or correlation analysis evaluating the importance of selected covariates can reduce the number of evaluations. Graphical evaluations of data are often utilized under the assumption that if a relationship is significant, it should be visibly evident. Example plots are provided in Figure 4, however, once covariates are included in the model, visual trends should not be present.
+
+Build the covariate model: Without covariate screening, covariates are tested separately and all covariates meeting inclusion criteria are included (full model). With screening, only covariates identified during screening are evaluated separately and all relevant covariates are included. Covariate selection is usually based on OBJ using the LRT for nested models. Thus, statistical significance can be attributed to covariate effects and prespecified significance levels (usually P \< 0.01 or more) are set prior to model-based evaluations. Covariates are then dropped (backwards deletion) and changes to the model goodness of fit is tested using LRT at stricter OBJ criteria (e.g., P \< 0.001) than was used for inclusion (or another approach). This process continues until all covariates have been tested and the reduced or final model cannot be further simplified.
+
+### Overview
+
+Covariate modeling is a key aspect of most pharmacometric model-development goals. Inclusion of covariates in a model help explain variability between patients and improve model predictive peformance. A number of covariate selection methods have been developed, but by far the most common in the pharmacometrics literature is the stepwise forward inclusion and backward elimination procedure. This approach is so common that it has been automated by the most common software. Although this approach can be successful, stepwise selection processes have a number of issues that you must be aware of before using it.
+
+### Stepwise forward inclusion and backward elimination procedures
+
+Stepwise selection procedures are methods used in statistical modeling, including linear regression, to iteratively add or remove predictors (features) from a model based on statistical criteria. The goal is to find a subset of predictors that optimally balance the model's fit to the data and complexity, so as to not over fit the data. Forward selection starts with an empty model and iteratively adds one predictor at a time. At each step, it adds the predictor that provides the most significant improvement in model fit. This is a simple covariate selection strategy that can help discover significant predictors one at a time, leading to a simple and interpretable model. However, this procedure may overlook important predictors if their significance depends on the presence of other predictors and is prone to overfitting as more predictors are added. The backward elimination starts with a model containing all predictors and iteratively removes the least significant predictor at each step. Tends to provide a more conservative approach compared to forward selection. Can help avoid overfitting by removing less relevant predictors. Similar to forward selection, it may miss interactions or synergistic effects among predictors. May lead to underfitting if important predictors are removed early. Imposing stringent selection criteria (*α* \< 0.05) reduces the risk of type‐I error, but does so at the cost of reduced power.
+
+#### Problems with stepwise procedures
+
+| Problem                                | Description                                                                                                                                |
+|--------------------|----------------------------------------------------|
+| **Overfitting**                        | Stepwise procedures can lead to overfitting when many predictors are tested, as the likelihood of finding spurious associations increases. |
+| **Multiple Comparisons**               | Repeated testing of predictors increases the risk of finding significant associations by chance (Type I errors).                           |
+| **Model Instability**                  | Adding or removing a single predictor can lead to large changes in the model's structure and make future assessments unstable              |
+| **Interactions and Nonlinear Effects** | Does not capture interactions or nonlinear effects among predictors.                                                                       |
+| **P-value Interpretation**             | Relying solely on p-values for significance can lead to selection bias, as variables can be selected based on chance.                      |
+
+::: callout-warning
+Stepwise forward inclusion and backward elimination procedures have been automated in many pharmacometric software, but often an over parameterized model may result in warnings such as "Minimization successful but problems reported with convergence." You might see this and think, "My model converged", but if you check the parameter estimates they may be no, or nearly no, different from the initial estimates suggesting the algorithm has not sufficiently explored the parameter space. User beware!
+:::
+
+### Full Random Effects Model
+
+Covariates are modeled as random variables, described by mean and variance. The method captures the covariate effects in estimated covariances between individual parameters and covariates. This approach is robust against issues that may cause reduced performance in methods based on estimating fixed effects (e.g., correlated covariates where the effects cannot be simultaneously identified in fixed‐effects methods).
+
+### Regularization Techniques
+
+#### Least Absolute Shrinkage and Selection Operation (LASSO)
+
+The Least Absolute Shrinkage and Selection Operator (LASSO) procedure is a regression technique used for both feature selection and regularization in statistical modeling and machine learning. It's particularly useful when dealing with high-dimensional data and a large number of predictors (features), as it can help prevent overfitting and enhance model interpretability. LASSO achieves this by applying a penalty to the absolute values of the regression coefficients, encouraging some coefficients to be exactly zero, effectively leading to feature selection.
+
+LASSO adds a penalty term to the linear regression objective function. This penalty is proportional to the absolute values of the coefficients. As a result, some coefficients are shrunk to zero, effectively performing feature selection. This is called **Penalization of Coefficients.** LASSO's property of reducing some coefficients to exactly zero leads to automatic feature selection. It identifies and retains the most relevant predictors while discarding less relevant ones, which can simplify the model and improve its generalization to new data.
+
+**Regularization:** In addition to feature selection, LASSO acts as a regularization technique. It helps prevent overfitting by controlling the magnitude of the coefficients. The amount of regularization is controlled by a parameter, usually denoted as λ (lambda). Larger values of λ result in stronger regularization and more coefficients being shrunk towards zero. **L1 Regularization:** LASSO uses L1 regularization, which means that the penalty added to the objective function is the sum of the absolute values of the coefficients. This is in contrast to L2 regularization (used in ridge regression), which adds the sum of the squared values of the coefficients. **Sensitivity to Scaling:** LASSO is sensitive to the scale of the predictors. Scaling the predictors (standardizing or normalizing) before applying LASSO is recommended to ensure fair treatment of all features.
+
+#### Ridge Regression
+
+Ridge regression (L2 regularization) can be used to automatically select relevant covariates and prevent overfitting. Ridge regression is a regularization technique used in linear regression to address multicollinearity and prevent overfitting, particularly in cases where there are many predictors (features) or when these predictors are highly correlated. It does this by adding a penalty term to the linear regression objective function, which encourages the regression coefficients to be small, effectively regularizing the model. **Regularization:** Ridge regression adds a penalty term to the sum of squared residuals in the linear regression objective function. This penalty term is proportional to the sum of squared values of the regression coefficients, scaled by a parameter called λ (lambda). **L2 Regularization:** Ridge regression uses L2 regularization, meaning that the penalty is based on the sum of the squared values of the coefficients. This is in contrast to L1 regularization (used in LASSO), which adds the sum of the absolute values of the coefficients. **Preventing Overfitting:** The regularization term in ridge regression discourages the model from fitting the training data too closely, preventing overfitting. It helps stabilize the model by reducing the magnitude of coefficients, making the model less sensitive to small changes in the training data.
+
+### Elastic Net
+
+Combination between LASSO and Ridge Regression.
+
+**Multicollinearity Mitigation:** Ridge regression is especially useful when dealing with multicollinearity, where predictors are highly correlated. It helps stabilize coefficient estimates by distributing the impact of correlated predictors more evenly across them.
+
+**Tuning Parameter (λ):** The λ parameter controls the strength of regularization. Larger values of λ result in stronger regularization, which leads to smaller coefficient estimates. The optimal value of λ is often determined using techniques like cross-validation.
+
+**Shrinking Effect:** Ridge regression's penalty term "shrinks" the coefficients towards zero. However, unlike LASSO, it doesn't lead to exact zero coefficients. Ridge regression keeps all predictors in the model but with reduced weights.
+
+::: callout-note
+Ridge regression strikes a balance between fitting the data and preventing overfitting by introducing regularization. It's a valuable tool for improving model stability, handling multicollinearity, and building models that generalize well to new data.
+:::
+
+### References
+
+### Recommended Reading/Resources

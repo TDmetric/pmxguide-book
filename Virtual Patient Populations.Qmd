@@ -1,0 +1,91 @@
+---
+title: "Virtual Patient Populations"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    echo: false
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Virtual Patient Populations
+
+```{r}
+library(tidyverse)
+library(simstudy)
+library(mrgsolve)
+```
+
+### Overview
+
+Virtual Patient Populations comprise a growing area of research in pharmacometrics. When we want to run *in silico* clinical trials, the validity of the results of these simulations will be dependent not only on the models we use to simulate the trial, but the hypothetical patients (i.e., the covariate distribution). It always made me laugh when one of my mentors at UNC used to say, "We don't want any 100-pound babies in our simulation...". This sounds obvious, but generating realistic covariate data is actually very challenging. How do you capture the associations between covariates that may or may not follow continuous distributions. The application that got me really interested in this was trying to create a virtual patient population for patients with Chronic Myelogenous Leukemia. I needed to find a way to capture the relationships between the number of previous treatment regimens (count data), a baseline biomarker (continuous variable bounded by zero), and years since diagnosis (continuous variable bounded at zero).
+
+This is likely an area for machine learning methods to shine in the future.
+
+### Simulating Correlated Data
+
+Simulation of correlated data may be trivial when the variables are normally distributed, but things get much harder when the data are of different types (binary, count, time-to-event, etc). Two additional functions facilitate the generation of correlated data from *binomial*, *poisson*, *gamma*, and *uniform* distributions: genCorGen and addCorGen. These functions draw on copula-based methods (Chapter XX) to generate the data.
+
+```{r}
+set.seed(1234)
+def <- defData(varname = "xbase", formula = 5, variance = .2, dist = "gamma", id = "cid")
+def <- defData(def, varname = "lambda", formula = ".5 + .1*xbase", dist="nonrandom", link = "log")
+def <- defData(def, varname = "p", formula = "-2 + .3*xbase", dist="nonrandom", link = "logit")
+def <- defData(def, varname = "gammaMu", formula = ".5 + .2*xbase", dist="nonrandom", link = "log")
+def <- defData(def, varname = "gammaDis", formula = 1, dist="nonrandom")
+
+dt <- genData(1000, def)
+
+dtX1 <- addCorGen(dtOld = dt, idvar = "cid", rho=0.5, nvars = 3, corstr='cs',
+                    dist = "poisson", param1 = "lambda", cnames='p1, p2, p3')
+
+dtX2 <- addCorGen(dtOld = dtX1, idvar = "cid", nvars = 3, rho = .5, corstr = "cs",
+                    dist = "binary", param1 = "p", cnames = 'b1,b2,b3')
+
+dtX3 <- addCorGen(dtOld = dtX2, idvar = "cid", nvars = 3, rho = .5, corstr = "cs",
+                  dist = "gamma", param1 = "gammaMu", param2 = "gammaDis", cnames='g1,g2,g3')
+
+vpp <- gtX3
+```
+
+### Sample VPP Function
+
+**Description**: Given a dataset of IDs (the virtual patient population), this function samples n_patients for a total of n_replicates. the function returns a list of n_replicates dataframes. For example, **sample_vpp(vpp, 40, 20)** will return a list of 20 data frames, each containing 40 patients sampled from the vpp.
+
+```{r}
+sample_vpp <- function(data, n_patients, n_replicates) {
+  sample_data_list <- vector('list', n_replicates)
+  
+  for (i in 1:n_replicates) {
+    sample_ids <- sample(unique(data$ID), n_patients, replace=FALSE)
+    subset_data <- subset(data, ID %in% sample_ids)
+    sample_data_list[[i]] <- subset_data
+  }
+  
+  return(sample_data_list)
+}
+```
+
+Some considerations provided by Pete Bonate, PhD in Pharmacokinetic/Pharmacodynamic Modeling & Simulation (pg. 524) are to consider:
+
+-   Is the covariate fixed over time (a stationary process) or does it vary randomly over time (a nonstationary process)? A stationary covariate is a subject's sex, while a nonstationary covariate might be a patient's weight, which may fluctuate during the course of a study.
+
+-   If hte covairate changes over time, does it do so randomly (a stochastic process) or in some systamatic manner (a deterministic process)? In a healthy volunteer, serum glucose concentrations may change randomly over time because of changes in diet, time of day, etc, but overall may remain the same over a prolonged period of time. Age, however, changes in a deterministic manner over time.
+
+-   Are the errors or random deviations from the mean within a subject independent and identically distributed or are the correlated? Observations close in time usually tend to be correlated (serial correlation) while observations distant in time are usually independent. What constitutes "distant" may be different for different variables.
+
+-   If a covariate is stochastic, what is the PDF (probability density function) that describes the randomness, e.g., is the randomness normally distributed around some mean or is it more skewed and consistent with a log-normal distriubtion?
+
+-   Are a set of covariates indpednent or are they correlated? For example, age and weight tend to be correlated. So if age and weight were needed for a simulation then this correlation needs to be taken into account.
+
+### References
+
+### Recommended Reading/Resources

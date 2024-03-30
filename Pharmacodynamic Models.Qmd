@@ -1,0 +1,1308 @@
+---
+title: "Pharmacodynamic Models"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+bibliography: references.bib
+---
+
+# Pharmacodynamic (PD) Models
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+library(tidyverse)
+library(mrgsolve)
+```
+
+## Background
+
+Pharmacodynamics (PD) comprises the study of drug effects on the body and the mechanisms underlying these effects. Pharmacokinetic (PK)/PD models quantitatively describe the time-course of the concentration-effect relationship, aiding in drug development, dose selection, safety assessment, and therapeutic optimization. These models help us understand how drugs interact with their therapeutic targets and the relationships between drug concentration and response. There are a large number of PD models that have been published over the past several decades. These models continue to evolve and integrate advances in biology, mathematics, and computational techniques. I've provided here some of (what I think) are the most important PD models to help build your intuition and reasoning about drug mechanism of action. Once you understand these key models, you will be well on your way to being able to reason about drug action, develop new PD models, or combine multiple them to describe more complex drug mechanisms. A very useful introductory reference for these concepts is [@upton2014]
+
+## Key Concepts
+
+**Receptor Occupancy Theory** is a fundamental concept in pharmacodynamics which postulates that the drug effect is related to receptor binding.
+
+$$
+Drug + Receptor \xrightarrow {} [Complex] \xrightarrow {}Effect
+$$
+
+**Dose-response relationships:** The dose of a drug is related to the magnitude of the response it produces. The dose-response relationship illustrates how changes in drug dose correlate with changes in the intensity of the drug's effect.
+
+**Agonist/Antagonist:** An agonist is a drug or compound that binds to a specific receptor and activates it, leading to a biological response. An antagonist is a drug or compound that binds to a specific receptor without activating it.
+
+**Efficacy/Potency:** Efficacy refers to the maximum effect a drug can produce, while potency reflects the dose at which a drug produces a specific effect. A drug with higher efficacy produces a greater effect, whereas potency relates to the concentration needed to achieve a specific effect.
+
+**Binding affinity:** The binding affinity between a drug and its target receptor determines how tightly they interact. Higher affinity generally leads to stronger and longer-lasting effects.
+
+**Tolerance/sensitization:** Prolonged drug exposure can lead to changes in the body's response over time. Tolerance occurs when the body becomes less responsive to the drug's effects, while sensitization involves an increased response to the drug.
+
+## Direct Effects
+
+Direct effects models posit the magnitude of drug effect to be directly proportional to the concentration of drug in the plasma. In other words, the drug may be assumed to be directly responsible for the PD response and the effect site is the plasma or the equilibrium between plasma and effect site concentrations is rapidly achieved. PK/PD models that follow this relationship demonstrate maximum PD effects concurrent with peak drug concentrations in the site of action.
+
+#### Linear Effects
+
+The magnitude of effect at time t, $E_t$ is linearly related to the concentration of drug in the plasma $CP_t$ through a parameter, $k$ .
+
+$$
+E_t = k*CP_t
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+le <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+m    : 0.2 : slope effect parameter
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+
+$GLOBAL
+#define CP (CENT/V1)
+#define E (m*CP)
+
+$ODE
+dxdt_CENT   =  -CL*CP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+E  : Effect
+'
+
+le <- mcode("le", le)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+le %>%
+  ev(amt=300) %>% 
+  mrgsim(end=50, delta=1) %>%
+  plot(E~CP)
+```
+
+#### Log-Linear Effects
+
+The magnitude of effect at time t, $E_t$ is related to the log of the concentration of drug in the plasma $CP_t$ through a parameter, $k$ .
+
+$$
+E_t=k*ln(CP_t)
+$$
+
+### Biophase (Effect compartment/Link models)
+
+Biophase models, also referred to as "effect compartment" and "link models", can be used to describe delays between peak drug concentrations and maximum drug effect. If there is a time delay between the observed pharmacological effect and plasma concentration, a plot of response versus concentration will demonstrate a **hysteresis** **loop**. These models are theoretically useful when drug must distribute to a hypothetical effect site before eliciting its pharmacological action. A major assumption of biophase models is that the distribution of the drug to this effect site does not alter the drug's plasma PK. The $k_{eo}$ parameter is typically used to describes the rate of distribution of the drug from the plasma to the effect compartment and when combined with plasma kinetics gives concentration at the effect site $C_e$ .
+
+::: callout-note
+Smaller $k_{eo}$ values produce later peaks in the effect magnitude because they correspond to slower drug distribution to the effect site. Peak effect times are the same for all doses under this model.
+:::
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+link <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+Ve   : 1   : effect compartment volume
+keo  : 0.01 : distribution to effect compartment
+k    : 0.2 : slope effect parameter
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+EFF    : Effect compartment (mass)
+
+$GLOBAL
+#define CP (CENT/V1)
+#define Ce (EFF/Ve)
+#define E (k*Ce)
+
+$ODE
+dxdt_CENT   =  -CL*CP - keo*CP;
+dxdt_EFF = keo*CP - keo*Ce;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+Ce : Effect concentration
+E  : Linear Effect
+'
+
+link <- mcode("link", link)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+link %>%
+  ev(data.frame(ID=1:3, amt=c(200, 300, 1000), cmt=1)) %>% 
+  mrgsim(end=100, delta=1) %>% 
+  plot(EFF~time|factor(ID))
+```
+
+### Ordinary Emax Model
+
+The E~max~ model is a PD workhorse. Understanding this equation is absolutely essential. The model poses a maximum drug effect asymptote, $E_{max}$ , with the effect increasing nonlinearly with increasing drug concentrations. The $EC_{50}$ parameter describes the concentration of drug that elicits half the maximum drug response. A plot of the response versus the log of the concentration produces the classic S-shaped concentration-response curve.
+
+$$
+E = \frac{E_{max}*C}{EC_{50}+C}
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+Emax <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+EC50 :  2  : Concentration for 50% of max inhibition
+EMAX :  1  : Maximum stimulation 
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+
+$GLOBAL
+#define CP (CENT/V1)
+#define E ((EMAX*CP)/(EC50+CP))
+
+$ODE
+dxdt_CENT   =  -CL*CP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+E  : Effect
+'
+
+Emax <- mcode("Emax", Emax)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+Emax %>%
+  ev(amt=500) %>% 
+  mrgsim(end=50, delta=0.1) %>% 
+  plot(E~log(CP))
+```
+
+#### Emax with baseline effect
+
+This model is a modification of the ordinary E~max~ model that can be used if there is some baseline effect (prior to drug administration).
+
+$$
+E = E_0 + \frac{E_{max}*C}{EC_{50}+C}
+$$
+
+The E~max~ model is commonly used when the drug effect stimulates a response, but the same concentration-effect relationship can be used to describe inhibitory drug effects. In this case, $I_{max}$ and $IC_{50}$ are used in place of $E_{max}$ and $EC_{50}$ , respectively.
+
+$$
+E = E_0 - \frac{I_{max}*C}{IC_{50}+C}
+$$
+
+The parameterization below can be used to denote the fractional increase in response instead of the absolute.
+
+$$
+E = E_0 * (1+\frac{E_{max}*C}{EC_{50}+C})
+$$
+
+Or the fractional decrease in response.
+
+$$
+E = E_0 * (1-\frac{I_{max}*C}{IC_{50}+C})
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+# the Emax model with a baseline response
+Emaxb <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+EC50 :  2  : Concentration for 50% of max inhibition
+EMAX :  1  : Maximum stimulation 
+E0   : 3   : Baseline effect
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+
+$GLOBAL
+#define CP (CENT/V1)
+#define E (E0 + (1+((EMAX*CP)/(EC50+CP))))
+
+$ODE
+dxdt_CENT   =  -CL*CP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+E  : Effect
+'
+
+Emaxb <- mcode("Emaxb", Emaxb)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+Emaxb %>%
+  ev(amt=300) %>% 
+  mrgsim(end=50, delta=0.1) %>% 
+  plot(E~log(CP))
+```
+
+::: callout-note
+Add random effects to the E~0~ parameter to extend this model a population with heterogeneity in the baseline response.
+:::
+
+### Sigmoidal Emax Model
+
+The sigmoidal E~max~ model adds a parameter, $n$ , to the ordinary E~max~ model which increases its flexibility by modifying the steepness of the concentration-effect curve. This model is also referred to as the **Hill equation**. The $n$ parameter does not have any biological interpretation. Play with the $n$ parameter until you see the effect move from a continuous to a step function.
+
+$$
+E = E_0 + \frac{E_{max}*C^n}{EC_{50}^n+C^n}
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+semax <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+EC50 :  2  : Concentration for 50% of max inhibition (mass/volume)
+EMAX :  1  : Maximum inhibition 
+n    :  1  : Imax model sigmoidicity
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+
+$GLOBAL
+#define CP (CENT/V1)
+#define E (EMAX*pow(CP,n)/(pow(EC50,n)+pow(CP,n)))
+
+$ODE
+dxdt_CENT   =  -CL*CP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+E  : drug effect
+n  : Hill coefficient
+'
+
+semax <- mcode("semax", semax)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+e <- data.frame(ID = 1:4, amt=300, n=c(0.5, 1, 2, 3), evid=1, cmt=1)
+
+semax %>%
+  ev(e) %>% 
+  mrgsim(end=50, delta=0.1) %>% #as.data.frame() %>% view()
+  plot(E~log(CP)|factor(n))
+```
+
+These models may be combined to estimate the effects of combination therapies.
+
+$$
+E = E_0 - \frac{I_{max(1)}*C^{n(1)}}{IC_{50(1)} + C^{n(1)}} - \frac{I_{max(2)}*C^{n(2)}}{IC_{50(2)} + C^{n(2)}}
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+semax_comb <- '
+$PARAM @annotated
+// drug 1
+CLa   :  1  : Clearance (volume/time)
+V1a   : 10  : Central volume (volume)
+
+// drug 2
+CLb   :  10  : Clearance (volume/time)
+V1b   : 30  : Central volume (volume)
+
+// PD
+EC50a :  2  : Concentration for 50% of max stimulation (mass/volume)
+EMAXa :  1  : Maximum stimulation 
+na    :  1  : Emax model sigmoidicity
+EC50b :  2  : Concentration for 50% of max stimulation (mass/volume)
+EMAXb :  1  : Maximum stimulation 
+nb    :  1  : Emax model sigmoidicity
+
+
+$CMT  @annotated
+CENTa   : Central compartment (mass) drug a
+CENTb   : Central compartment (mass) drug b
+
+$GLOBAL
+#define CPa (CENTa/V1a)
+#define CPb (CENTa/V1b)
+#define Ea (EMAXa*pow(CPa,na)/(pow(EC50a,nb)+pow(CPa,na)))
+#define Eb (EMAXb*pow(CPb,nb)/(pow(EC50b,nb)+pow(CPb,nb)))
+#define ET (Ea+Eb)
+
+$ODE
+dxdt_CENTa   =  -CLa*CPa;
+dxdt_CENTb   =  -CLb*CPb;
+
+$CAPTURE @annotated
+CPa : Plasma concentration (mass/volume)
+CPb : Plasma concentration (mass/volume)
+Ea  : drug a effect
+Eb : drug b effect
+ET : total drug effect
+'
+
+semax_comb <- mcode("semax_comb", semax_comb)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+e <- data.frame(ID=1, amt=c(200, 300), cmt=c(1,2), time=c(0, 0.01), evid=c(1, 1))
+
+semax_comb %>%
+  data_set(e) %>% 
+  mrgsim(end=24, delta=0.1) %>% 
+  plot(Ea+Eb+CPa+CPb~time)
+```
+
+### Agonist/Antagonist Interaction Models
+
+### Competitive antagonism
+
+Competitive antagonism describes the effect of a drug that is competes with the an endogenous ligand for an active site on an enzyme, but does not stimulate the receptor itself. Below, $L$ and $EL_{50}$ represent the concentration and potency of the endogenous ligand, respectively. In this model, the action of the endogenous ligand can be thought of as decreasing the potency of the drug by pushing the drug's $EC_{50}$ higher. A larger concentration of drug is required to inhibit enzyme activity with increasing concentration and potency of the endogenous ligand.
+
+$$
+E = \frac{E_{max}*C}{[1+\frac{L}{EL_{50}}]*EC_{50} + C}
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+cant <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+L    : 0   : endogenous ligand concentration
+EL50 : 1   : endogenous ligand potency
+EC50 :  10  : Concentration for 50% of max inhibition
+EMAX :  20  : Maximum stimulation 
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+
+$GLOBAL
+#define CP (CENT/V1)
+#define E (EMAX*CP)/((1+(L/EL50))*EC50+CP)
+
+$ODE
+dxdt_CENT   =  -CL*CP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+E  : Drug Effect
+L  : endogenous ligand concentration
+'
+
+cant <- mcode("cant", cant)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+cant %>%
+  ev(data.frame(ID=1:3, amt=300, cmt=1, L=c(1, 5, 10))) %>%
+  mrgsim(end=30, delta=1) %>% 
+  plot(E~log(CP)|factor(ID))
+```
+
+#### Noncompetitive antagonism
+
+When the drug binds to a site other than the endogenous ligand's binding site, a noncompetitive antagonism model may be appropriate. In this model, the action of the endogenous ligand can be thought of as, not altering the $EC_{50}$ of the drug, but as modifying the drug's $E_{max}$ by a factor of $L/EL_{50}$.
+
+$$
+E = \frac{E_{max}*C}{[1+\frac{L}{EL_{50}}]*[EC_{50} + C]}
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+ncant <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+L    : 3   : endogenous ligand concentration
+EL50 : 1   : endogenous ligand potency
+EC50 :  2  : Concentration for 50% of max inhibition
+EMAX :  1  : Maximum stimulation 
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+
+$GLOBAL
+#define CP (CENT/V1)
+#define E (EMAX*CP)/((1+(L/EL50))*(EC50+CP))
+
+$ODE
+dxdt_CENT   =  -CL*CP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+E  : Effect
+L  : endogenous ligand concentration
+'
+
+ncant <- mcode("ncant", ncant)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+ncant %>%
+  ev(amt=50, cmt=1) %>%
+  mrgsim(end=24, delta=0.1) %>% #as.data.frame() %>% view()
+  plot(CP+E+L~time)
+```
+
+### Indirect response models
+
+The indirect response (IDR) models describe PD effects in which the drug acts on the formation or elimination of a response variable. This creates a lag time between drug concentrations and PD response even after the drug reaches the site of action. The basic idea to these models is that the response is produced by a zero-order input, $k_{in}$ , and a first-order elimination rate, $k_{out}$ . Drugs can increase the magnitude of response by stimulating $k_{in}$ or by inhibiting $k_{out}$ or decrease the magnitude of the response by inhibiting the $k_{in}$ or stimulating the $k_{out}$ .
+
+| Indirect Response Models | Description              |
+|--------------------------|--------------------------|
+| Type I                   | Inhibition of $k_{in}$   |
+| Type II                  | Inhibition of $k_{out}$  |
+| Type III                 | Stimulation of $k_{in}$  |
+| Type IV                  | Stimulation of $k_{out}$ |
+
+#### IDR Type I
+
+$$
+\frac{dR}{dt}=k_{in}*(1-\frac{I_{max}*C}{IC_{50}+C}) - k_{out}*R
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+irm1 <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+KIN  : 10  : Response in rate constant (1/time)
+KOUT :  2  : Response out rate constant (1/time)
+IC50 :  2  : Concentration for 50% of max inhibition (mass/volume)
+IMAX :  1  : Maximum inhibition 
+n    :  1  : Imax model sigmoidicity
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+RESP   : Response compartment
+
+$GLOBAL
+#define CP (CENT/V1)
+#define INH (IMAX*pow(CP,n)/(pow(IC50,n)+pow(CP,n)))
+
+$MAIN
+RESP_0 = KIN/KOUT;
+
+$ODE
+dxdt_CENT   =  -CL*CP;
+dxdt_RESP   =  KIN*(1-INH) - KOUT*RESP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+'
+
+irm1 <- mcode("irm1", irm1)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+  irm1 %>%
+  ev(amt=50, cmt=1) %>%
+  mrgsim(end=24, delta=0.1) %>% 
+  plot(CP+RESP~time)
+```
+
+#### IDR Type II
+
+$$
+\frac{dR}{dt}=k_{in} - k_{out}*(1-\frac{I_{max}*C}{IC_{50}+C})*R
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+irm2 <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+KIN  : 10  : Response in rate constant (1/time)
+KOUT :  2  : Response out rate constant (1/time)
+IC50 :  2  : Concentration for 50% of max inhibition (mass/volume)
+IMAX :  1  : Maximum inhibition 
+n    :  1  : Imax model sigmoidicity
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+RESP   : Response compartment
+
+$GLOBAL
+#define CP (CENT/V1)
+#define INH (IMAX*pow(CP,n)/(pow(IC50,n)+pow(CP,n)))
+
+$MAIN
+RESP_0 = KIN/KOUT;
+
+$ODE
+dxdt_CENT   =  -CL*CP;
+dxdt_RESP   =  KIN*(1-INH) - KOUT*RESP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+'
+
+irm2 <- mcode("irm2", irm2)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+irm2 %>%
+  ev(amt=50, cmt=1) %>%
+  mrgsim(end=24, delta=0.1) %>% 
+  plot(CP+RESP~time)
+```
+
+#### IDR Type III
+
+$$
+\frac{dR}{dt}=k_{in}*(1-\frac{E_{max}*C}{EC_{50}+C}) - k_{out}*R
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+irm3 <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+KIN  : 10  : Response in rate constant (1/time)
+KOUT :  2  : Response out rate constant (1/time)
+EC50 :  2  : Concentration for 50% of max inhibition (mass/volume)
+EMAX :  1  : Maximum inhibition 
+n    :  1  : Imax model sigmoidicity
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+RESP   : Response compartment
+
+$GLOBAL
+#define CP (CENT/V1)
+#define STIM (EMAX*pow(CP,n)/(pow(EC50,n)+pow(CP,n)))
+
+$MAIN
+RESP_0 = KIN/KOUT;
+
+$ODE
+dxdt_CENT   =  -CL*CP;
+dxdt_RESP   =  KIN*(1+STIM) - KOUT*RESP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+'
+
+irm3 <- mcode("irm3", irm3)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+  irm3 %>%
+  ev(amt=50, cmt=1) %>%
+  mrgsim(end=24, delta=0.1) %>% 
+  plot(CP+RESP~time)
+```
+
+#### IDR Type IV
+
+$$
+\frac{dR}{dt}=k_{in} - k_{out}*(1-\frac{E_{max}*C}{EC_{50}+C})*R
+$$
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+irm4 <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+KIN  : 10  : Response in rate constant (1/time)
+KOUT :  2  : Response out rate constant (1/time)
+EC50 :  2  : Concentration for 50% of max inhibition (mass/volume)
+EMAX :  1  : Maximum inhibition 
+n    :  1  : Imax model sigmoidicity
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+RESP   : Response compartment
+
+$GLOBAL
+#define CP (CENT/V1)
+#define STIM (EMAX*pow(CP,n)/(pow(EC50,n)+pow(CP,n)))
+
+$MAIN
+RESP_0 = KIN/KOUT;
+
+$ODE
+dxdt_CENT   =  -CL*CP;
+dxdt_RESP   =  KIN - KOUT*(1+STIM)*RESP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+'
+
+irm4 <- mcode("irm4", irm4)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+irm4 %>%
+  ev(amt=50, cmt=1) %>%
+  mrgsim(end=24, delta=0.1) %>% #as.data.frame() %>% view()
+  plot(CP+RESP~time)
+```
+
+### Negative feedback, tolerance and rebound models
+
+In many cases, drug effects act on physiological systems that are self-regulating and drug effects are counterbalanced by endogneous mechanisms (i.e., negative feedback). Additionally, drug effects may wane with increasing use, a phenomenon that goes by a number of names including desensitization, tachyphylaxis, and tolerance. Many approaches have been suggested for modeling each of these phenomenon.
+
+### Negative feedback
+
+In this model, the input rate, $k_{in}$ is modulated by an increasing response through a feedback mechanism. As the magnitude of the response, $R$ approaches the set point, $SP$ , the input rate goes to zero.
+
+$$ 
+\frac{dR}{dt} = k_{in}*[1-R/SP] - k_{out}*R 
+$$
+
+```{r}
+nf <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+kin  : 4  : Response in rate constant (1/time)
+kout :  2  : Response out rate constant
+SP   : 10  : set point
+k    : 0.2  : drug linear effect
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+R   : Response compartment
+
+$GLOBAL
+#define CP (CENT/V1)
+#define E (k*CP)
+
+$MAIN
+//R_0 = kin/kout*SP/(SP + (kin/kout));
+R_0 = kin/kout;
+
+$ODE
+dxdt_CENT   =  -CL*CP;
+dxdt_R   =  kin*E*(1-(R/SP)) - kout*R;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+E  : drug effect at CP
+'
+
+nf <- mcode("nf", nf)
+```
+
+```{r}
+nf %>%
+  ev(amt=100, cmt=1, evid=1, ii=6, addl=5) %>%
+  mrgsim(end=50, delta=1) %>%
+  plot(R~time)
+```
+
+#### Precursor turnover model
+
+$$ \frac{dP}{dt}=k_{in} - k_{tol}*P $$
+
+$$ \frac{dR}{dt}=k_{tol}*P - k_{out}*R $$
+
+```{r}
+prec_turnover <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+kin  : 10  : Response in rate constant (1/time)
+kout :  2  : Response out rate constant (1/time)
+ktol :  2  : 
+
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+PREC   : Precursor compartment
+RESP   : Response compartment
+
+$GLOBAL
+#define CP (CENT/V1)
+
+$MAIN
+PREC_0 = kin/ktol;
+RESP_0 = ktol/kout;
+
+$ODE
+dxdt_CENT   =  -CL*CP;
+dxdt_PREC   =  kin - ktol*PREC;
+dxdt_RESP   =  ktol*PREC - kout*RESP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+'
+
+prec_turnover <- mcode("prec_turnover", prec_turnover)
+```
+
+```{r}
+prec_turnover %>%
+  ev(amt=300, ii=6, addl=5, evid=1, cmt=1) %>%
+  mrgsim(end = 30, delta=1) %>%
+  plot(CP+PREC+RESP~time)
+```
+
+#### Feedback on turnover rate
+
+This model may be used to capture a system with self-regulating turnover. It does not capture rebound.
+
+$$ \frac{dP}{dt}=k_{in}*(1-\frac{R}{R_{max}}) - k_1*P $$
+
+$$ \frac{dR}{dt}=k_{tol}*P - k_{out}*R $$
+
+```{r}
+feedback_on_turnover <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+kin  : 10  : Response in rate constant (1/time)
+kout :  2  : Response out rate constant (1/time)
+rmax : 15  : Maximum response
+ktol :  2  : 
+k1   : 1   : 
+
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+PREC   : Precursor compartment
+RESP   : Response compartment
+
+$GLOBAL
+#define CP (CENT/V1)
+
+$MAIN
+RESP_0 = kin/kout;
+PREC_0 = ktol/kout;
+
+$ODE
+dxdt_CENT   =  -CL*CP;
+dxdt_PREC   =  kin*(1-(RESP/rmax)) - k1*PREC;
+dxdt_RESP   =  ktol*PREC - kout*RESP;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+'
+
+feedback_on_turnover <- mcode("feedback_on_turnover", feedback_on_turnover)
+```
+
+```{r}
+feedback_on_turnover %>%
+  ev(amt=300, evid=1, cmt=1, addl=2, ii=6) %>%
+  mrgsim(end=30, delta=1) %>%
+  plot(CP+PREC+RESP~time)
+```
+
+#### Turnover feedback via a moderator
+
+Includes a moderator $M$ compartment. This model is able to capture both tolerance and rebound effects. This model may be used to model enzyme induction. The feedback is said to be negative because a transient increase in R produces, through the resultant increased outflow, a reduction in R.
+
+$$
+\frac{dR}{dt}=k_{in} - k_{out}*M
+$$
+
+$$
+\frac{dM}{dt}=k_{tol}*R - k_{tol}*M
+$$
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+### Feedback via Tolerance
+
+$$
+\frac{dR}{dt} = k_{in}*Tol^\gamma*I(t) - k_{out}*R
+$$
+
+$$
+\frac{dTol}{dt} = k_{tol}*\frac{R_0}{R}-k_{tol}*Tol
+$$
+
+```{r}
+tolerance <- '
+$PARAM @annotated
+CL   :  1  : Clearance (volume/time)
+V1   : 10  : Central volume (volume)
+kin  : 10  : Response in rate constant (1/time)
+kout :  2  : Response out rate constant (1/time)
+ktol :  1  : 
+gamma : 1  : 
+
+
+$CMT  @annotated
+CENT   : Central compartment (mass)
+R      : Response compartment
+TOL    : Tolerance compartment
+
+$GLOBAL
+#define CP (CENT/V1)
+#define I (0.2*CP)
+
+$MAIN
+R_0 = kin/kout; // ODE initial condition
+double Rbl = kin/kout; // this actually defines the variable to be used elsewhere
+TOL_0 = ktol/ktol; // =1
+
+$ODE
+dxdt_CENT   =  -CL*CP;
+dxdt_R = kin*pow(Tol, gamma)*I - kout*R;
+dxdt_TOL   =  ktol*Rbl/R - ktol*TOL;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+kin : zero order input for response
+kout : first order output for response
+ktol : 
+gamma :
+'
+
+tolerance <- mcode("tolerance", tolerance)
+```
+
+### Oscillating baseline
+
+Some responses, such as endocrine hormones, follow a pulsatile profile or circadian rhythm.
+
+$$
+R = Amplitude*cos(\frac{2\pi}{period}*(t-t_0))
+$$
+
+```{r}
+osc <- '
+$PARAM @annotated
+Amp : 2 : amplitude
+per : 24 : period
+pi  : 3.14 : 
+
+$TABLE
+double R = Amp*cos((2*pi/per)*TIME);
+
+$CAPTURE @annotated
+R : response
+'
+
+osc <- mcode("osc", osc)
+```
+
+```{r}
+osc %>%
+  ev(data.frame(ID=1, evid=1, cmt=0)) %>%
+  mrgsim(end=72, delta=0.1) %>%
+  plot(R~time)
+```
+
+This oscillating function can be used to model a pulsatile profile of endocrine hormones and other diurnal molecules.
+
+$$
+\frac{dR}{dt}=k_{in} - k_{out}*R
+$$
+
+$$
+k_{in} = k_{in0} + k_{in0}*Amplitude*cos(\frac{2\pi}{period}*(t-t_0))
+$$
+
+```{r}
+osc_de <- '
+$PARAM @annotated
+CL   : 2   : clearance
+V    : 20   : volume
+kinu : 30  : average input rate
+kout : 2 : output rate
+Amp : 2 : amplitude
+per : 24 : period
+pi  : 3.14 : 
+k   : 0.2 : linear drug effect
+
+$CMT CENT R
+
+$GLOBAL
+#define CP (CENT/V)
+#define E (k*CP)
+
+$ODE
+dxdt_CENT = -CL*CP;
+dxdt_R = kin*(1-E) - kout*R;
+
+$MAIN
+R_0 = kinu/kout;
+double kin = kinu + kinu*Amp*cos((2*pi/per)*TIME);
+
+$CAPTURE @annotated
+CP : plasma concentration
+kin : kin
+'
+
+osc_de <- mcode("osc_de", osc_de)
+```
+
+```{r}
+osc_de %>%
+  ev(amt=0, evid=1, cmt=1, addl=2, ii=6) %>%
+  mrgsim(end=30, delta=1) %>%
+  plot(CP+R~time)
+```
+
+### Transduction Models
+
+Signal transduction processes control or contribute to many drug responses in converting receptor or mediator signals into pharmacologic responses. This process is similar to the biophase models, except the drug has to traverse more than one effect compartment to get to the effect site. Simulate with this model to understand how the maximum drug effect and time to maximum drug effect change with increasing drug dose and with increasing/decreasing mean transit time $MTT$.
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+transduction <- '
+$PARAM @annotated
+// PK
+TVKA   : 0.25 : Absorption rate constant (1/hr)
+TVCL   :  6  : Clearance (volume/time)
+TVV1    : 15  : Central volume (volume)
+TVVe    : 1   : Effect compartment volume
+TVMTT   : 3   : mean transit time
+
+// PD
+EC50 :  25  : Concentration for 50% of max inhibition
+EMAX :  10  : Maximum stimulation 
+  
+$CMT  @annotated
+ABS    : Extravascular compartment (mass)
+CENT   : Central compartment (mass)
+TRAN1  : Transit compartment 1
+TRAN2  : Transit compartment 2
+TRAN3  : Transit compartment 3
+EFF    : Effect compartment
+
+$GLOBAL
+#define CP (CENT/TVV1)
+#define Ce (EFF/TVVe)
+#define E ((EMAX*Ce)/(EC50+Ce))
+
+$MAIN
+double ktr = 4/TVMTT;
+double k12 = ktr;
+double k23 = ktr;
+double k34 = ktr;
+double k45 = ktr;
+double k10 = TVCL/TVV1;
+
+$ODE
+dxdt_ABS   = -TVKA*ABS;
+dxdt_CENT  =  TVKA*ABS - k10*CENT;
+dxdt_TRAN1 = k12*CENT - k23*TRAN1;
+dxdt_TRAN2 = k23*TRAN1 - k34*TRAN2;
+dxdt_TRAN3 = k34*TRAN2 - k45*TRAN3;
+dxdt_EFF = k45*TRAN3 - k45*EFF;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+Ce : Effect compartment concentration
+E  : Effect magnitude
+'
+
+transduction <- mcode("transduction", transduction)
+```
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+transduction %>%
+  ev(amt=200, cmt=1) %>%
+  mrgsim(end=50, delta=1) %>% #as.data.frame() %>% view()
+  plot(CP+Ce+E~time)
+```
+
+### Chemotherapy induced myelosuppression (Friberg Model)
+
+$$
+\frac{dProl}{dt}=k_{prol}*Prol*(1-E_{Drug})*(\frac{Circ_0}{Circ})^\gamma-k_{tr}*Prol
+$$
+
+$$
+\frac{dTransit1}{dt}=k_{tr}*Prol-k_{tr}*Transit1
+$$
+
+$$
+\frac{dTransit2}{dt}=k_{tr}*Transit1-k_{tr}*Transit2
+$$
+
+$$
+\frac{dTransit3}{dt}=k_{tr}*Transit2-k_{tr}*Transit3
+$$
+
+$$
+\frac{dCirc}{dt}=k_{tr}*Transit3-k_{circ}*Circ
+$$
+
+$$
+Feedback = (\frac{Circ_0}{Circ})^\gamma
+$$
+
+```{r}
+friberg <- '
+$PARAM @annotated
+CL      :  6      : Clearance (volume/time)
+V1      : 15      : Central volume (volume)
+GAMMA   :  0.17   :
+MTT     : 125     : 
+k       : 1.5     : effect slope
+CIRC0   : 7       : baseline circulting cells
+  
+$CMT  @annotated
+CENT   : Central compartment (mass)
+PROL   : Proliferating cells
+TRAN1  : Transit compartment 1
+TRAN2  : Transit compartment 2
+TRAN3  : Transit compartment 3
+CIRC   : Circulating cells
+
+$GLOBAL
+#define CP (CENT/V1)
+#define E (k*CP)
+
+$MAIN
+CIRC_0 = CIRC0; //(*10^9 cells);
+PROL_0 = CIRC0; 
+double ktr = 4/MTT;
+double kcirc = ktr;
+double kprol = ktr
+double k10 = CL/V1;
+
+$ODE
+dxdt_CENT  = -k10*CENT - ktr*CENT;
+dxdt_PROL = kprol*PROL*(1-E)*pow((CIRC0/CIRC), GAMMA)-ktr*PROL;
+dxdt_TRAN1 = ktr*CENT - ktr*TRAN1;
+dxdt_TRAN2 = ktr*TRAN1 - ktr*TRAN2;
+dxdt_TRAN3 = ktr*TRAN2 - ktr*TRAN3;
+dxdt_CIRC = ktr*TRAN3 - kcirc*CIRC;
+
+$CAPTURE @annotated
+CP : Plasma concentration (mass/volume)
+E  : Effect magnitude
+'
+
+friberg <- mcode('friberg', friberg)
+```
+
+```{r}
+friberg %>%
+  ev(amt=100, cmt=1, evid=1) %>%
+  mrgsim(end = 30, delta=1) %>%
+  plot(CIRC+PROL~time)
+```
+
+### Nonlinear Transduction - The "Operational Model"
+
+The operational model recognizes that the activity of drugs is a function of both affinity and efficacy. It combines the agonist binding model (E~max~) with a transducer equation that describes the drug's efficacy. The transducer ratio is the ratio of receptor expression level to the concentration of agonist-receptor complex that produces a half-maximal stimulus. The operational model introduces the concept of different receptor states. In the simplest case, receptors can exist in two states: the inactive (R) state and the activated (R\*) state. The binding of the agonist induces a transition of receptors from the inactive state to the activated state. The KA represents the equilibrium constant between the activated (R\*) and inactive (R) states of the receptor. It quantifies the propensity of the receptor to transition from the inactive state to the activated state upon agonist binding. The response amplification parameter α quantifies the gain of the response for a unit change in the fraction of activated receptors. It accounts for the downstream signal amplification mechanisms. The KD is the concentration of the agonist at which half of the receptors are occupied. It's a measure of the affinity between the agonist and the receptor and is related to the KA and efficacy τ.
+
+$$
+\tau=\frac{R_0}{K_E}
+$$
+
+$$
+E = \frac{E_{max}*\tau^n*C^n}{(EC_{50}+C)^n+\tau^n*C^n}
+$$
+
+```{r}
+#| eval: false
+opmod <-'
+$PARAM @annotated
+CL   : 2   : clearance
+V    : 20   : volume
+kinu : 30  : average input rate
+kout : 2 : output rate
+Amp : 2 : amplitude
+per : 24 : period
+pi  : 3.14 : 
+k   : 0.2 : linear drug effect
+
+$CMT CENT R
+
+$GLOBAL
+#define CP (CENT/V)
+#define E (k*CP)
+
+$ODE
+dxdt_CENT = -CL*CP;
+dxdt_R = kin*(1-E) - kout*R;
+
+$MAIN
+R_0 = kinu/kout;
+double kin = kinu + kinu*Amp*cos((2*pi/per)*TIME);
+
+$CAPTURE @annotated
+CP : plasma concentration
+kin : kin
+'
+
+#opmod <- mcode('opmod', opmod)
+```
+
+### SABRE - A Shiny Application
+
+Below is some old Rshiny code I used to create an interactive web application demonstrating the model published by Peter Buchwald in this paper, [@frontier]. It is called the SABRE model because this model can account for **S**ignal **A**ctivation, **B**inding **a**ffinity, **R**eceptor activation, and **E**fficacy (partial agonism). Feel free to adapt it for your own applications.
+
+```{r}
+#| eval: false
+library(tidyverse)
+library(shiny)
+library(shinythemes)
+library(gridExtra)
+
+# SABRE model (Signal Amplification, Binding affinity, Receptor Activation Efficacy)
+
+ui <- fluidPage(theme=shinytheme("cerulean"),
+  
+# Application title
+titlePanel(h1("Interactive SABRE Model", align="center")),
+
+# Side panel
+sidebarLayout(
+sidebarPanel(
+  selectInput("Kd", "Equilibrium dissociation constant (Kd)", 
+            c(1*10*exp(-11), 1*10*exp(-10), 1*10*exp(-8), 
+              1*10*exp(-7), 1*10*exp(-6), 1*10*exp(-5), 1*10*exp(-4), 1*10*exp(-3))),
+  sliderInput("Eps", " Ligand Intrinsic efficacy (partial agonism)", 
+              min=0, max=1, value=1, step=0.05),
+  sliderInput("gam", "Amplification (nonlinear signal transduction)", 
+              min=1, max=5, value=1, step=1),
+  sliderInput("EpsRo", "Fraction of unbound, active receptors (constitutive activity)", 
+              min=0, max=1, value=0, step=0.05),
+  sliderInput("n", "Hill coefficient", 
+            min=0.1, max=3, value=1, step=0.1)
+),
+
+# Main panel
+mainPanel(
+  plotOutput("plotEffect")
+  )
+ )
+)
+
+
+server <- function(input, output) {
+  output$plotEffect <- renderPlot( {
+    
+# Collect input from user-widgets
+Kd <-  input$Kd     # equilibrium dissociation constant; need a range
+Eps <- input$Eps    # intrinsic efficacy; range 0<Eps<1
+gam <- input$gam    # Amplification param; range 1<gam<inf
+EpsRo <- input$EpsRo    # fraction of unbound receptors that are active
+n <- input$n         # Hill coefficient
+conc <- 1*10*exp((seq(-12, -1, length.out=500))) # ligand concentrations
+    
+# Calculate effect
+SABRE <- (Eps*gam*(conc^n) + EpsRo*gam*as.numeric(Kd))/
+        ((Eps*gam - Eps + 1)*(conc^n) + (EpsRo*gam - EpsRo + 1)*as.numeric(Kd))
+   
+# Create the dataframe - Should create a separate data frame for each ligand of interest
+# and then plot their simulated points individually (with a drop down for ligand)
+sim <- SABRE + rnorm(500, 0, 0.025)
+df <- data.frame(conc, SABRE, sim)
+
+    
+# Generate the plot
+pl <- ggplot(df) + 
+  geom_line(aes(x=log(conc), y=SABRE), color="red") + 
+  geom_point(aes(x=log(conc), y=sim), shape=21, size=0.5) +
+  geom_hline(yintercept=0.5, linetype="dashed", size=0.5, color="blue") +
+  labs(main="Concentration-Effect Relationship",
+           x = "Log Concentration",
+           y = "E/Emax") +
+  ylim(0,1) +
+  xlim(-10, 2) +
+  scale_x_continuous(breaks=seq(-10, 2, by=2)) +
+  theme_classic()+labs(x = "Log Concentration") + 
+  theme(axis.ticks = element_line(size = 1),
+  axis.title = element_text(size = 16,
+  face = "bold"), axis.text = element_text(size = 14),
+  plot.title = element_text(face = "bold"))
+
+
+print(pl)
+    
+  }) # renderPlot function
+} # input, output function
+  
+
+shinyApp(ui, server)
+```
+
+### References

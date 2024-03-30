@@ -1,0 +1,804 @@
+---
+title: "Optimal Design"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    echo: false
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Optimal Design
+
+```{r}
+library(tidyverse)
+library(Hmisc)
+library(rms)
+```
+
+### 
+
+# Introduction
+
+> Currently we put too much emphasis on analyzing data for the sake of completing a report. The study is over! I'd argue the focus should be extracting information from data we have to facilitate better design of the next trial. We should always be thinking about how to fill our knowledge gaps." - **Dan Weiner, PhD**
+
+We all want to design "optimal" studies. But what makes a study design, "optimal"? If you asked me, I'd say an "optimal" design is one that maximizes efficiency, or in other words, the ratio of *information-gained* to *resources-used*. So, how can we use models to do this?
+
+A key aspect to the design of clinical trials in model-informed drug development (MIDD) is that the data collected (e.g., PK/PD, efficacy, safety, etc) will be analyzed with a model, the model will be judged through an assessment of model fit, and formal conclusions about the drug will be derived from the results. Thus, an optimal design may be one that faciltates model parameter estimation [without bias]{.underline} and with [minimal uncertainty]{.underline}. Of course, this rests on the assumption that the relevant models will be identifiable and have enough precision in parameter estimates to be trustworthy. For many years, the theory of experimental design has been an important area of research in mathematical statistics. The roots of this field can be traced back to the time of Ronald Fisher in the 1920s and 1930s while working at the Rothamsted Agricultural Experimental Station ("The Design of Experiments" - Ronald Fisher). Since then, experimental design methodologies have been developed for diverse applications, particularly in engineering and agriculture. In this document, I hope to convey the general principles of optimal design, optimal control, benefit/risk (BR) assessment, and clinical trial simulation (CTS) from a conceptual (i.e., a non-mathematical statistician's) and technical perspective.
+
+# 1. Optimal Design
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+#| fig-width: 5
+setwd("C:/Users/tcdb78/Documents/Gonzalez/Experimental_Design")
+knitr::include_graphics("Optimal_design_paper.png")
+```
+
+## Conceptual
+
+A population pharmacokinetic (popPK) study design is comprised of a group of elementary designs each composed of a set of sampling times to be performed in a number of subjects. **Design factors** are things like the number of elementary designs, proportion of subjects in each strata, number of samples collected per subject, PK sampling times, etc. An efficient study will give the best combination of these design factors to maximize the *information-gained* to *resources-used* ratio.
+
+In general, there are two approaches to the design of popPK studies: the "simulation-based" approach and the "model-based" approach. The "simulation-based" approach involves generation of pseudo-experimental concentrations for hypothetical patients (given a hypothetical design) using fully specified structural and statistical models. Subsequently, the model is fit to these pseudo-concentrations and a comparison of the resulting parameter estimates is made to the true values used for the simulation. By comparing the model estimates and their precision, we can try to identify a study design that minimizes the bias (gets as close to the true values as possible) and uncertainty (standard errors in parameter estimates) of the parameter estimates. This is a labor-intensive, time-consuming, trial-and-error approach to optimal design. Although many different types of evaluations can be made, the process can be slow, especially if model estimation time is long, potentially resulting in few designs being evaluated. There are a number of simulation-based studies in the literature, mainly those designed to confirm the influence of experimental design factors on parameter estimates.
+
+#### Simulation-based "optimal design" workflow
+
+```{mermaid}
+%%| fig.width: 6.5
+flowchart LR
+  id1[Select model] --> id2[Propose elementary<br>design]
+  id2 --> id3[Fit model]
+  id3 --> id4[Evaluate bias<br>and precision]
+  id4 --> id2
+```
+
+The "model-based" approach is based on the view that a model has been selected from previous studies, will be used to design future studies, and analyse the resulting data (similar to the "simulation-based" strategy). This approach allows the analyst to consider the design of the study from a statistical and mathematical point of view. Unlike the "simulation-based" method, this approach is relatively quick and can be used to draw general conclusions about competing designs. Importantly, the results are based on the assumption that that the model is *correct*, although information concerning model uncertainties can be built into the design (primarily with Bayesian models).
+
+::: callout-important
+The "model-based" approach is based on the **Cramer--Rao inequality** stating that the inverse of the **Fisher information matrix** (FIM) is the lower bound of the variance--covariance matrix of any unbiased estimator of the parameters [@walter1987]. This assertion offers the opportunity to define an **optimality criterion** as a function of the FIM.
+:::
+
+#### Model-based "optimal design" workflow
+
+```{mermaid}
+%%| fig.width: 6.5
+flowchart LR
+  id1[Select model] --> id2[Choose optimality<br>criteria]
+  id2 --> id3[Specify design<br>constraints]
+  id3 --> id4[Evaluate FIM]
+```
+
+#### Fisher Information Matrix
+
+$$
+M_F(\psi,\xi) = -E[\frac{\partial^2}{\partial\psi\partial\psi^T}log L(\psi;y)|\psi]
+$$
+
+-   $\psi$ is the vector of population parameters (e.g., $\theta$ , $\eta$, $\omega$, $\epsilon$).
+
+-   $y$ is the vector of observations
+
+-   $\xi$ is the vector of design variables (e.g., sampling times)
+
+-   $log L$ is the log-likelihood.
+
+In mathematical statistics, the **Fisher information** is a way of measuring the amount of information that an observable random variable $X$ carries about an unknown parameter $\theta$ of a distribution that models *X*. It describes the probability that we observe a given outcome of $X$, given a known value of $\theta$ . If $f$ is sharply peaked with respect to changes in $\theta$ , it is easy to indicate the "correct" value of $\theta$ from the data, or equivalently, that the data $X$ provides a lot of information about the parameter $\theta$ . Formally, it is the variance of the expected value of the observed information.
+
+The FIM is central to optimal design because the the reciprocity of estimator-variance and **Fisher information**, thus, [minimizing the variance of the parameter estimate corresponds to maximizing the information]{.underline}. When a model has several parameters, the inverse of the variance matrix is called the "information matrix". In less technical terms, the FIM gives an evaluation of the expected model parameter uncertainty via an evaluation of the curvature of the expected likelihood surface.
+
+Because an evaluation of the FIM is more efficient than CTS, many more designs can be investigated, and the design *space* itself (incorporating practical constraints) may be considered. For example, one could try to find optimal PK-sampling time points, dose levels, or landmark times for a comparison of a clinical endpoints between groups. Note, however, that standard errors and residual standard errors predicted by the FIM are often close, but theoretically **only lower bounds** of the true uncertainty may be estimated.
+
+With an optimal design approach (instead of CTS), many more designs can be evaluated and very complex designs considering the best sampling times, doses, etc. may be suggested which could be missed in the trial-and-error approach.
+
+> *"What's the catch?"*
+>
+> To design a study that will produce the best estimate of the parameter values, WE FIRST NEED TO KNOW THE PARAMETER VALUES. If we knew the model parameters with certainty, why design the study?
+
+### Optimality Criteria
+
+There are a number of optimality criteria discussed in the literature, all involving some function of the FIM. However, **D-optimality** seems to be, by far, the most commonly used. Figures demonstrating these in progress.
+
+-   **D** - minimizes the volume of confidence ellipsoid
+
+-   **A** - minimizes diagonal of largest rectangular box enclosing ellipsoid
+
+-   **E** - minimizes the principal axis of confidence ellipsoid
+
+-   **C** - minimizes the average squared coefficient of variation
+
+Optimal designs generally result in sampling as many time points as you have $\theta$s, and if you collect more samples, then replicate the time points. For PK/PD models, true optimal designs are not possible (because we can't replicate sampling times) and are impractical (we don't have enough time points to fit a more complicated model).
+
+## Technical
+
+In general, to evaluate or optimize a trial design using the FIM you will need a model, a set of model parameter values, a design/design space, and the tasks to be performed. True optimal designs require:
+
+1.  the [ability to collect replicates]{.underline} (or near replicates) at each time point if you collect more samples than you have $\theta$s.
+2.  the form of variance function to be known.
+3.  the form of the model function to be known.
+4.  preliminary estimates of the parameters.
+
+#### Optimal Design in NONMEM
+
+The design algorithms in NONMEM have been modeled after **PopED** [@foracchia2004] and **PFIM** [@dumont2018]. A design criterion is selected, which is generally some measure of the standard errors that would result from a particular design. The most typical one is the negative logarithm of the determinant of the FIM (D-optimality) or the logarithm of the variance-covariance matrix of the estimate. The smaller these values, the lower the standard errors of the parameter estimates. The \$DESIGN record in NONMEM can be used to specify design criteria and find the optimal design elements, or for evaluating design elements proposed by the user.
+
+\$DESIGN could be used:
+
+1.  before parameter estimation, using some reasonable initial estimate of parameters, to explore if parameters using this model and particular data set are expected to be estimable.
+2.  after parameter estimation to see what the RSE of parameters one would expect given that the model generated the data.
+3.  prospectively evaluate or optimize a design.
+
+#### Design Types in NONMEM
+
+Several optimization algorithms, optimization criteria, and tools to defined design constraints are available in NONMEM.
+
++-----------+-------------------------+---------------------------------+-----------------------------------------------------------------------------------------------------------------------------+
+| OFVTYPE   | Design Type             | Optimizing                      | Note                                                                                                                        |
++===========+=========================+=================================+=============================================================================================================================+
+| 0,1,3,4,5 | D-optimality            | $-log(det(FIM))$                | FIM is inverse of variance-covariance matrix                                                                                |
++-----------+-------------------------+---------------------------------+-----------------------------------------------------------------------------------------------------------------------------+
+| 2         | A-optimality            | $-1/tr(1/FIM))$                 | The "trace" of the FIM                                                                                                      |
++-----------+-------------------------+---------------------------------+-----------------------------------------------------------------------------------------------------------------------------+
+| 6         | Ds-optimality           | $-log(det(FIM))$                | Allows for some thetas to be declares as "uninteresting" and excluded from the design evaluation.                           |
+|           |                         |                                 |                                                                                                                             |
+|           |                         | $+log(det(FIM (uninteresting))$ |                                                                                                                             |
++-----------+-------------------------+---------------------------------+-----------------------------------------------------------------------------------------------------------------------------+
+| 7         | R-optimality            | $-1/tr(sqrt(1/FIM)/Parameter))$ | R for relative standard error                                                                                               |
++-----------+-------------------------+---------------------------------+-----------------------------------------------------------------------------------------------------------------------------+
+| 8         | Individual Bayesian FIM | $-log(det(Bayes FIM))$          | Optimizing ETC() as listed in the .phi table. These are the conditional variance-covariance of the individual's parameters. |
++-----------+-------------------------+---------------------------------+-----------------------------------------------------------------------------------------------------------------------------+
+
+**Limitation:** Currently, \$DESIGN in NONMEM can only be used for [continuous data models]{.underline}. Evaluating the FIM is much more complex for binary, discrete, and time-to-event models. However, I think PopED and PFIM have more advanced methods for evaluating designs with these types of data types.
+
+#### \$DESIGN control streams
+
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| Argument   | Options                               | Use                                                                                                                                                                                                                                                                        |
++============+=======================================+============================================================================================================================================================================================================================================================================+
+| GROUPSIZE  | n                                     | Allows for the expected variance-covariance from a design with n subjects.                                                                                                                                                                                                 |
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| FIMDIAG    | n = 0 (default), 1 (more appropriate) | FIMDIAG = 1 option indicates evaluation of the FIM with block-diagonal modality.                                                                                                                                                                                           |
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| TSTRAT     |                                       | In \$INPUT. Specifies aspects of the design to be optimized. Each unique TSTRAT value will be optimized. TSTRAT=0 specifies no optimization for the record.                                                                                                                |
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| TMIN       |                                       | In \$INPUT. Design space constraints.                                                                                                                                                                                                                                      |
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| TMAX       |                                       | In \$INPUT. Design space constraints.                                                                                                                                                                                                                                      |
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| MAXEVAL    | n                                     | Indicates that we wish to have a design optimization performed (MAXEVAL=999).                                                                                                                                                                                              |
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| DESEL      |                                       | DESEL (design elements) - indicates which design elements are to be optimized (e.g., DESEL=TIME).                                                                                                                                                                          |
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| DESELSTRAT |                                       | Stratification variable for the optimization. Optimization will be computed for each unique value of TSTRAT, with possible values of the DESEL bounded by user specified variables (e.g., DESLMIN and DESLMAX) by the values listed in column TMIN and TMAX, respectively. |
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| DESLMIN    |                                       | Specify lower bound for stratification variable.                                                                                                                                                                                                                           |
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| DESLMAX    |                                       | Specify upper bound fo stratification variable.                                                                                                                                                                                                                            |
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| METHOD     | NELDER, FEDOROV, STGR, RS, DISCRETE   | Optimization method: NELDER is default.                                                                                                                                                                                                                                    |
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| UNINT      |                                       | Used to delcare parameters in the theta or omega blocks that are uninteresting. \$OMEGA (0.09 UNINT)                                                                                                                                                                       |
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| STRATF     |                                       | Data item containing fraction representation for the associated elementary design. If multiple design elements are being evalautated, STRATF denotes the relative weight of influence of the particular stratification on the FIM. Initial values of STRATF must sum to 1. |
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+| STRAT      |                                       | Data item containing the stratification index pertaining to the STRATF design element. If STRAT\>0, the STRATF values are optimized. If STRAT\<0, STRATF values are not optimized.                                                                                         |
++------------+---------------------------------------+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------+
+
+#### Example 1:
+
+In the example below, the same elementary design (sampling times, doses, covariates) for all 32 subjects is evaluated. The report file will contain the computed FIM and its derived components, including the expected standard errors of the parameter estimates, the design criterion objective function, and the expected shrinkage of the individual random effects in the model given the design.
+
+```{fortran}
+#| eval: false
+#| echo: true
+
+$PROBLEM
+C   ID    TIME    AMT   RATE    EVID    MDV   DV
+.   1     0       70    0       1       1     0
+.   1     1       0     0       0       0     1
+.   1     4       0     0       0       0     1
+.   1     8       0     0       0       0     1
+
+
+$INPUT ID TIME AMT RATE EVID MDV DV
+$DATA warfarin.csv IGNORE=C
+$SUBROUTINES ADVAN2 TRANS2
+
+$PK
+; MU REFERENCING NOT REQUIRED
+MU_1 = LOG(THETA(1))
+MU_2 = LOG(THETA(2))
+MU_3 = LOG(THETA(3))
+CL = EXP(MU_1 + ETA(1))
+V = EXP(MU_2 + ETA(2))
+KA = EXP(MU_3 + ETA(3))
+
+S2=V2
+F1=1
+
+$ERROR
+IPRED = A(2)/V
+Y = IPRED + IPRED*EPS(1)
+
+$THETA
+0.15
+8.0
+1.0
+
+$OMEGA 0.07 0.02 0.6
+
+$SIGMA 0.01 FIXED
+
+; GROUPSIZE is a multiplier to the FIM
+; FIMDIAG=1 means to use block diagonal FIM
+$DESIGN GROUPSIZE=32 FIMDIAG=1
+```
+
+#### Example 1 cont.
+
+In the next example, the trial design proposed in example 1 is optimized. Here, we are giving very loose restrictions on the design space (note the very low TMIN and very high TMAX). All of the sampling windows are between 0.01 and 200 hours. These options could be useful to impose real-world design constraints (e.g., staffing, financial, or practical limitations) if needed. All rows have unique TSRTAT values, so the times of each of these records are to be independently varied during optimization. The initial, dosing, row will not be varied during optimization (TSTRAT = 0). Each group of times that share the same TSTRAT value are constrained to be the same value during the optimization. If the TSTRAT value is 0, then the TIME of this particular record will not be optimized.
+
+```{fortran}
+#| eval: false
+#| echo: true
+$PROBLEM
+C   ID    TIME    AMT   RATE    EVID    MDV   DV    TSTRAT    TMIN    TMAX
+.   1     0       70    0       1       1     0     0         0       200
+.   1     1       0     0       0       0     1     1         0.01    200
+.   1     4       0     0       0       0     1     2         0.01    200
+.   1     8       0     0       0       0     1     3         0.01    200
+
+
+$INPUT ID TIME AMT RATE EVID MDV DV TSTRAT TMIN TMAX
+$DATA warfarin.csv IGNORE=C
+$SUBROUTINES ADVAN2 TRANS2
+
+$PK
+; MU REFERENCING NOT REQUIRED
+MU_1 = LOG(THETA(1))
+MU_2 = LOG(THETA(2))
+MU_3 = LOG(THETA(3))
+CL = EXP(MU_1 + ETA(1))
+V = EXP(MU_2 + ETA(2))
+KA = EXP(MU_3 + ETA(3))
+
+S2=V2
+F1=1
+
+$ERROR
+IPRED = A(2)/V
+Y = IPRED + IPRED*EPS(1)
+
+$THETA
+0.15
+8.0
+1.0
+
+$OMEGA 0.07 0.02 0.6
+
+$SIGMA 0.01 FIXED
+
+; GROUPSIZE is a multiplier to the FIM
+; FIMDIAG=1 means to use block diagonal FIM
+$DESIGN GROUPSIZE=32 FIMDIAG=1 MAXEVAL=9999 PRINT=20
+        DESEL=TIME  DESELSTRAT=TSTRAT DESELMIN=TMIN DESELMAX=TMAX
+        
+$TABLE ID TIME TSTRAT TMIN TMAX EVID MDV IPRED NOAPPEND NOPRINT   
+```
+
+#### PK/PD example
+
+We wish to create an elementary design in which four PK observations and four PD observations are obtained, with different sample times for the PK and PD samples. Notice that there is one PD (CMT = 3) record at time 0, whose TSTRAT index is 0, so this PD sample will be obtained predose, and its TIME value will not be optimized. The other seven records contain initial time positions, each having their own TSTRAT index, so that their TIME values are varied as independent design elements during design optimization. The CMT data item is two to indicate a PK sample, and three to indicate a PD sample. After optimization with the default Nelder (Simplex) method, the results (Table 5), shows that some times are repeated, and there are just six distinct times found (including the predose PD sample):
+
+```{fortran}
+#| eval: false
+#| echo: true
+
+$PROBLEM
+C   ID    TIME    AMT   RATE    EVID    MDV   DV    CMT   TSTRAT    TMIN    TMAX
+.   1     0       100   0       1       1     0     1     0         0       500
+.   1     0       0     0       0       0     1     3     0         0       500
+.   1     0.6     0     0       0       0     1     1     1         0.49    145
+.   1     3       0     0       0       0     1     2     2         0.49    145
+.   1     12      0     0       0       0     1     2     3         0.49    145
+.   1     24      0     0       0       0     1     3     4         10.0    121
+.   1     84      0     0       0       0     1     3     5         10.0    121
+.   1     110     0     0       0       0     1     3     6         10.0    121
+.   1     144     0     0       0       0     1     2     7         0.49    145
+
+
+$INPUT ID TIME AMT RATE EVID MDV DV TSTRAT TMIN TMAX
+$DATA warfarin.csv IGNORE=C
+$SUBROUTINES ADVAN2 TRANS2
+
+$PK
+; MU REFERENCING NOT REQUIRED
+MU_1 = LOG(THETA(1))
+MU_2 = LOG(THETA(2))
+MU_3 = LOG(THETA(3))
+CL = EXP(MU_1 + ETA(1))
+V = EXP(MU_2 + ETA(2))
+KA = EXP(MU_3 + ETA(3))
+
+S2=V2
+F1=1
+
+$ERROR
+IPRED = A(2)/V
+Y = IPRED + IPRED*EPS(1)
+
+$THETA
+0.15
+8.0
+1.0
+
+$OMEGA 0.07 0.02 0.6
+
+$SIGMA 0.01 FIXED
+
+; GROUPSIZE is a multiplier to the FIM
+; FIMDIAG=1 means to use block diagonal FIM
+$DESIGN GROUPSIZE=32 FIMDIAG=1 MAXEVAL=9999 PRINT=20
+        DESEL=TIME  DESELSTRAT=TSTRAT DESELMIN=TMIN DESELMAX=TMAX
+        
+$TABLE ID TIME TSTRAT TMIN TMAX EVID MDV IPRED NOAPPEND NOPRINT 
+```
+
+### Evaluate differences in sample times due to uncertainty in population parameters
+
+If you want to evaluate how the optimal sampling time points differ with different population parameters, you can set a prior distribution for the \$\\theta\$s and use the \$SIM TRUE=PRIOR to sample from a distribution of theta values. This should probably be the default method if you are actually designing a study.
+
+```{fortran}
+#| eval: false
+#| echo: true
+
+$PROBLEM WARFARIN
+$INPUT ID TIME AMT RATE EVID MDV DV TSTRAT TMIN TMAX
+$DATA priortrue.csv ignore=@
+
+$SUBROUTINES ADVAN2 TRANS2
+
+$PK
+MU_1=THETA(1)
+MU_2=THETA(2)
+MU_3=THETA(3)
+CL=EXP(MU_1+ETA(1))
+V=EXP(MU_2+ETA(2))
+KA=EXP(MU_3+ETA(3))
+S2=V
+F1=1.0
+LTVCL=THETA(1) ; log of typical value Clearance
+LTVV=THETA(2) ; log of typical value Volume
+LTVKA=THETA(3) ; log of typical value KA
+
+$ERROR
+IPRED=A(2)/V
+Y=IPRED*(1.0+EPS(1)) + EPS(2)
+
+$THETA
+-1.897 ;[lnCL]
+2.079  ;[lnV]
+0.0001  ;[lnKA]
+
+$OMEGA (0.07 ) (0.02 ) (0.6 )
+$SIGMA (0.01 ) (0.001 FIXED )
+
+; NWPRI=Normal Wishart Prior.  That is, theta priors are assumed normally distributed, 
+; and Omegas and Sigmas are assumed Wishart distributed.
+; PLEV=probability level over which random samples generated 
+; from the respective samplers are to be accepted.  
+; PLEV=0.99 allows acceptance of 99% of the samples generated, 
+; while avoiding extreme values that are outside of the 99% 
+; confidence bound of the distribution. When using the $PRIOR record to 
+; define the random sampler (Normal sampler for thetas, Wishart sampler for 
+; Omegas/Sigmas, PLEV must be specified. 
+
+$PRIOR NWPRI PLEV=0.99
+; Thetas are in log units, to ensure 30% variation does not produce negative parameters
+$THETAP (-1.897 FIXED) (2.079 FIXED) (0.001 FIXED)
+$THETAPV BLOCK(3) ; 30% CV=0.3*0.3=0.09
+0.09 FIX
+0.0   0.09
+0.0   0.0  0.09
+
+$SIM (4442223) SUBPROB=1000 TRUE=PRIOR
+$DESIGN NELDER FIMDIAG=1 GROUPSIZE=32 OFVTYPE=0 DESEL=TIME DESELSTRAT=TSTRAT DESELMIN=TMIN DESELMAX=TMAX
+        MAXEVAL=4000 SIGL=10 nohabort PRINT=100 NOPRIOR=1
+$TABLE ID LTVCL LTVV LTVKA TIME EVID MDV DV IPRED NOPRINT NOAPPEND FILE=priortrue.tab
+```
+
+#### Bayes Optimal Design to Optimal Sampling Times and Doses
+
+The Bayesian FIM is essentially the FIM for the maximum a posteriori estimation, and its information content (although using population information as a prior) is localized to data/elementary designs of a particular individual rather than the entire population. Here, we evaluate a design for Bayesian estimation of individual parameters, given population parameters. This example will be of great interest to clinicians interested in optimizing therapeutic drug monitoring.
+
+In this case, the conditional variance-covariances of the individual's parameters are optimized, identified as ETC(,), and the final values are listed in the .phi table. If just one subject (or subject type) is in the data file, then the criterion is that one subject's Bayesian FIM. If more than one subject (or subject type), then the Bayesian FIM of all the subjects, averaged together, is the criterion for design.
+
+```{fortran}
+#| eval: false
+#| echo: true
+
+$PROB RUN# example6 (from r2compl)
+$INPUT C SET ID JID TIME DV=CONC DOSE=AMT RATE EVID MDV CMT TSTRAT TMIN TMAX DSTRAT DMIN DMAX
+$DATA optex6d17.csv IGNORE=C
+
+$SUBROUTINES ADVAN13 TRANS1 TOL=10 ATOL=10
+$MODEL NCOMPARTMENTS=3
+
+$PK
+MU_1=THETA(1)
+MU_2=THETA(2)
+MU_3=THETA(3)
+MU_4=THETA(4)
+MU_5=THETA(5)
+MU_6=THETA(6)
+MU_7=THETA(7)
+MU_8=THETA(8)
+VC=EXP(MU_1+ETA(1))
+K10=EXP(MU_2+ETA(2))
+K12=EXP(MU_3+ETA(3))
+K21=EXP(MU_4+ETA(4))
+VM=EXP(MU_5+ETA(5))
+KMC=EXP(MU_6+ETA(6))
+K03=EXP(MU_7+ETA(7))
+K30=EXP(MU_8+ETA(8))
+S3=VC
+S1=VC
+KM=KMC*S1
+F3=K03/K30
+
+$DES
+DADT(1) = -(K10+K12)*A(1) + K21*A(2) - VM*A(1)*A(3)/(A(1)+KM)
+DADT(2) = K12*A(1) - K21*A(2)
+DADT(3) =  -(VM-K30)*A(1)*A(3)/(A(1)+KM) - K30*A(3) + K03
+
+$ERROR
+ETYPE=1
+IF(CMT.NE.1) ETYPE=0
+IPRED=F
+Y = F + ETYPE*( F*EPS(1)+EPS(2) ) + (1.0-ETYPE)*(F*EPS(3)+EPS(4))
+
+
+$THETA 
+3.90834E+00 
+-2.18787E+00  
+5.57985E-01 
+-1.86377E-01  
+2.26146E+00  
+2.10476E-01  
+3.70795E+00 
+-7.08909E-01 
+
+$OMEGA (0.0625 FIXED)X8
+$SIGMA  (9.27944E-03 FIXED) (0.0001 FIXED) (2.24692E-02 FIXED) (0.0001 FIXED)
+
+; Repeat $DESIGN optimization times, to assure Nelder has reached Minimum
+$DESIGN    OFVTYPE=8 
+;  design element TIME is sought to be otpimized
+           DESEL=TIME DESELSTRAT=TSTRAT DESELMIN=TMIN DESELMAX=TMAX
+;  design element DOSE (AMT) is also sought to be otpimized
+           DESEL=DOSE DESELSTRAT=DSTRAT DESELMIN=DMIN DESELMAX=DMAX
+           MAXEVAL=1000 SIGL=12 nohabort PRINT=100 FIMDIAG=1
+
+$DESIGN    OFVTYPE=8 DESEL=TIME 
+           DESELSTRAT=TSTRAT DESELMIN=TMIN DESELMAX=TMAX
+           DESEL=DOSE DESELSTRAT=DSTRAT DESELMIN=DMIN DESELMAX=DMAX
+           MAXEVAL=1000 SIGL=12 nohabort PRINT=100
+
+$DESIGN    OFVTYPE=8 DESEL=TIME 
+           DESELSTRAT=TSTRAT DESELMIN=TMIN DESELMAX=TMAX
+           DESEL=DOSE DESELSTRAT=DSTRAT DESELMIN=DMIN DESELMAX=DMAX
+           MAXEVAL=1000 SIGL=12 nohabort PRINT=100
+
+$DESIGN    OFVTYPE=8 DESEL=TIME 
+           DESELSTRAT=TSTRAT DESELMIN=TMIN DESELMAX=TMAX
+           DESEL=DOSE DESELSTRAT=DSTRAT DESELMIN=DMIN DESELMAX=DMAX
+           MAXEVAL=1000 SIGL=12 nohabort PRINT=100
+
+$DESIGN    OFVTYPE=8 DESEL=TIME 
+           DESELSTRAT=TSTRAT DESELMIN=TMIN DESELMAX=TMAX
+           DESEL=DOSE DESELSTRAT=DSTRAT DESELMIN=DMIN DESELMAX=DMAX
+           MAXEVAL=1000 SIGL=12 nohabort PRINT=100
+
+$DESIGN    OFVTYPE=8 DESEL=TIME 
+           DESELSTRAT=TSTRAT DESELMIN=TMIN DESELMAX=TMAX
+           DESEL=DOSE DESELSTRAT=DSTRAT DESELMIN=DMIN DESELMAX=DMAX
+           MAXEVAL=1000 SIGL=12 nohabort PRINT=100
+
+; Report the final times and dose in the user defined table:
+$TABLE ID DOSE CMT TIME EVID MDV DV TSTRAT NOPRINT NOAPPEND FILE=optex6d17_8.tab 
+```
+
+**Take-home:** The Fisher Information Matrix (FIM) plays an important role in optimal experimental design by providing a measure of the amount of information contained in the data about the parameters of a statistical model. The FIM is a matrix of second derivatives of the log-likelihood function with respect to the model parameters. The FIM provides a measure of the amount of information that can be gained about the parameters of a model from a given set of data. In optimal experimental design, the goal is to choose the best set of experimental conditions (e.g., sample size, measurement settings, etc.) that will maximize the amount of information that can be gained about the parameters of interest. This is typically done by maximizing a criterion that depends on the FIM, such as the determinant of the FIM (**D-optimality**), the trace of the inverse of the FIM (A-optimality), or the maximum eigenvalue of the inverse of the FIM (E-optimality).
+
+By choosing the optimal experimental design, one can maximize the efficiency of the data collection process and minimize the uncertainty in the estimates of the model parameters. In practice, optimal experimental design can be challenging due to the complexity of the model and the limitations on the available resources, but the FIM provides a useful tool for evaluating the information content of different experimental designs and for guiding the selection of the optimal design.
+
+\$DESIGN is a very useful optimal design tool that is conveniently implemented in NONMEM. This approach allows the user to easily evaluate designs using approaches based on the FIM, using already implemented models, parameter values, and sometimes designs.
+
+# 2. Optimal Control
+
+```{r}
+#| warning: false
+#| error: false
+#| message: false
+setwd("C:/Users/tcdb78/Documents/Gonzalez/Experimental_Design")
+knitr::include_graphics("Optimal_cont_paper.png")
+```
+
+## Conceptual
+
+Typically, to determine the optimal dose to reach a target exposure or predefined therapeutic goal, simulations from a PK/PD model are conducted for various dosing scenarios and the best dose is selected by the modeler based on the most suitable response. While MIDD has remarkably improved dosing recommendations for many drugs, the typical trial-and-error approach remains time-consuming, is limited to tested doses, and the selection may be based on subjective assessment. Like the "simulation-based" approach to optimal design, this method is susceptible to missing the "optimal" dose.
+
+**Control theory** refers to the ability and methods for changing a dynamic system (e.g., a system of ordinary differential equations) in a desired way. In PK/PD contexts, ordinary differential equations represents represent the states we are interested in tracking/tracking and we can use controls (doses) to alter the states of the system. For example, we may give (e.g., drug concentration), which will cause a change in the outcome (e.g., biomarker level). Helen Moore gives an excellent introduction to optimal control in the context of PK/PD problems in [@moore2018].
+
+```{mermaid}
+%%| fig.width: 6.5
+flowchart LR
+  id1[Dose] --> id2[Drug<br>concentration]
+  id2 --> id3[Biomarker<br>level]
+  id3 --> id4[Clinical<br>outcome]
+```
+
+### Objective functionals
+
+Optimal control tries to identify the inputs that get the system as close as possible to a desired outcome. The desired outcome is quantified by an **objective functional** that is maximized or minimized. The word functional simply means the objective is a function of one or more functions. While the objective is still a function, the term *functional* is more precise, just as the term "square" is more precise than "rectangle". Optimal control uses the same type of state and control functions that are used in control theory, but we add the objective functional and optimize it while the system behaves according to specified equations.
+
+In addition to a mathematical model for the system we wish to control, we also need a mathematical model for the treatment goal or objective. For a disease such as cancer, it could be important to minimize the cancer cell levels during and at the end of the treatment period. For the immune cells in the model, we may wish to keep their levels from being too low at the end of the treatment period. And therapies generally have a risk of side effects, so we don't want to use more than necessary during the treatment period. To put all of these goals together, we decide on a sign (positive or negative) and a relative weight for each goal and add the quantities we wish to minimize.
+
+The key idea behind optimal control is the way the dynamical system and the objective functional are tied together through the adjoint functions. To organize the necessary calculations for optimal control, we first form the Hamiltonian H. The Hamiltonian is a functional that provides a convenient way to record and combine information about the objective functional and the underlying system dynamics. It combines the right-hand sides of the state equations with the derivative of the objective functional, using the adjoint functions to multiply the state equation components.
+
+## Technical
+
+### Optimal control in NONMEM
+
+In addition to "optimizing" the design of a trial, we can use reformulate differential equations of a model and ask NONMEM to compute the input required (dose) to optimize a PK/PD metric of interest (e.g., Cmax, AUC, change from baseline, etc). Again, these types of problems originated in engineering (specifically, the aerospace industry), but its potential for use in "precision medicine" is evident. Similar to estimating model parameters for a PKPD model based on a given objective function, now the doses for the PKPD model with fixed model parameters are computed by minimizing an appropriate objective function.
+
+To set up an optimal dosing task, the following are required:
+
+1.  a PKPD model with [fixed]{.underline} parameters.
+2.  the dosing scenario (i.e., dosing time points, route of administration, maximal tolerated dose, etc).
+3.  the therapeutic goal characterized by a mathematical function called the **reference function**.
+
+The objective function:
+
+$$
+J(D) = 1/2 \int_{0}^{T}(h(y(t,D))-h_{ref}(t,\theta))^2dt
+$$
+
+measures the difference between the associated response and the desired therapeutic goal.
+
+This can be reformulated to an "artificial state" variable (another ordinary differential equation) to be minimized in NONMEM as:
+
+$$
+\frac{d}{dt}obj = \frac{1}{2}(B-B_{ref})^2
+$$
+
+This allows NONMEM to solve the optimization problem!
+
+```{r}
+#| fig-width: 5
+#| fig-height: 5
+#| fig-cap: For the optimal doses, the associated response is as close as possible to the therapeutic goal. OFV corresponds to minimizing the shaded area.
+#| warning: false
+#| error: false
+#| message: false
+setwd("C:/Users/tcdb78/Documents/Gonzalez/Experimental_Design")
+knitr::include_graphics("control_fig1.png")
+```
+
+Consequently, the optimal doses $D^*$ minimizes the objective function and brings the associated time course $h(y(t,D))$ of the model response as closely as possible to the user-defined therapeutic goal $h_{ref}(t,\theta)$. Specific choices of the functions $h$ and $h_{ref}$, as well as restrictions on the maximal doses $D_{max}$ and number of repeated applications of the dose define the problem setup of the optimal dosing task, and hence have an impact on the computed optimal doses $D^*$.
+
+### Indirect Response Model
+
+```{fortran}
+#| eval: false
+#| echo: true
+
+$PROB 
+C   TIME    AMT   DV    EVID    MDV
+.   0       1     0     1       1
+.   1       1     0     1       1
+.   2       1     0     1       1
+.   3       1     0     1       1
+.   4       1     0     1       1
+...
+.   42      0     0     0       0
+
+$INPUT C ID TIME AMT DV EVID MDV
+$DATA datafile.dat IGNORE=C
+$SUBROUTINES ADVAN13 TOL=6 ATOL=6
+$MODEL COMP=3
+
+$PK
+; define model parameters and grouping of doses
+VV = 3.0
+KOUT = 0.02
+KIN = 0.92
+KEL = 0.49
+EMAX = 8.8
+EC50 = 0.81
+B0 = KIN/KOUT
+BTAR = 10
+
+A_0(2) = B0
+
+; F1 scale (dose) changing each week
+F1 = THETA(1)
+IF (TIME >= 7.0) F1 = THETA(2) ; same daily dose in week 1
+IF (TIME >= 14.0) F1 = THETA(3) ; same daily dose in week 2
+IF (TIME >= 21.0) F1 = THETA(4) ; same daily dose in week 3
+IF (TIME >= 28.0) F1 = THETA(5) ; same daily dose in week 4
+IF (TIME >=35.0) F1 = THETA(6) ; same daily dose in week 6
+
+$DES
+DADT(1) = -KEL*A(1)
+CC = A(1)/VV
+DADT(2) = KIN - KOUT*(1+EMAX*CC/(EC50+CC))*A(2)
+
+
+; define the therapuetic goal (reference function)
+; Quadratic reference function for loading phase
+IF (T <= 14.0) BREF =1.0/14/14/*(B0-BTAR)*T*T - 2/14*(B0-BTAR)*T + B0
+
+; linear reference function for loading phase
+IF (T <= 14) BREF = -1/14*(B0*BTAR)*T + B0
+
+; constant function for maintenance phase
+IF (T > 14) BREF=BTAR
+
+; state equation to compute the OFV
+DADT(3) = 0.5*(A(2)-BREF)*(A(2)-BREF)   ; objective function to be minimized!
+
+$ERROR
+Y = A(3)
+
+$THETA
+(0, 1)
+(0, 1)
+(0, 1)
+(0, 1)
+(0, 1)
+(0, 1)
+
+$ESTIMATION -2LL NSIG=5 ; call the optimizer to compute doses
+```
+
+#### Multidimensional binding kinetics for a bispecific antibody
+
+```{fortran}
+#| eval: false
+#| echo: true
+
+C   TIME    AMT   DV    EVID    MDV
+.   0       1     0     1       1
+.   48      1     0     1       1
+.   96      1     0     1       1
+.   140     1     0     0       1
+
+$PROBLEM
+$INPUT C    ID    TIME    AMT   DV    EVID    MDV
+$DATA antibody.dat IGNORE=C
+$SUBROUTINES ADVAN13 TOL=10 ATOL=10
+$MODEL COMP=9
+
+$PK
+KEL = 0.1
+KON1 = 10.0
+KOFF1 = 0.01
+KON2 = 1.0
+KOFF2 = 0.01
+KON3 = 1.0
+KOFF3 = 0.01
+KON4 = 10.0
+KOFF4 = 0.01
+KSYNA = 1.0
+KDEGA = 0.1
+KSYNB = 10.0
+KDEGB 0.1
+KINTA = 0.05
+KINTB = 0.05
+KINTAB = 0.1
+K12 = 0.0
+K21 = 0.03
+KA = 0.2
+VV = 3.0
+RCREF = MIN(KSYNA/KDEGA, KSYNB/KDEGB)
+
+A_0(3) = KSYNA/KDEGA
+A_0(4) = KSYNB/KDEGB
+
+F1 = THETA(1)
+
+$DES
+DADT(1) = -KA*A(1)
+
+DADT(2) = KA*A(1)/VV + KOFF1*A(6) + KOFF*A(7) - (KEL+KON1*A(3)+KON2*A(4)+K12)*A(2) + K21*A(5)/VV
+
+DADT(3) = KSYNA - (KDEGA+KON1*A(2)+KON4*A(7))*A(3) + KOFF1*A(6) + KOFF4*A(8)
+
+DADT(4) = SYNB - (KDEGB+KON2*A(2)+KON3*A(6))*A(4) + KOFF2*A(7) + KOFF3*A(8)
+
+DADT(5) = K12*A(2)*VV - K21*A(5)
+
+DADT(6) = KON1*A(2)*A(3) - (KOFF1+KINTA)*A(6)) - KON3*A(4)*A(6) + KOFF3*A(8)
+
+DADT(7) = KON2*A(2)*A(4) - (KOFF2+KINTB)*A(7) - KON4*A(3)*A(7) + KOFF4*A(8)
+
+DADT(8) = KON4*A(3)*A(7) + KON3*A(4)*A(6) - (KOFF3+KOFF4+KINTAB)*A(8)
+
+; additional state equation to compute OFV
+DADT(9) = 0.5 * (A(8) - RCREF) * (A(8) - RCREF) 
+
+$ERROR
+Y = A(9)
+
+$THETA
+(0, 800)
+
+$ESTIMATION -2LL NSIG=5 PRINT=10
+```
+
+#### Therapeutic Drug Monitoring - Target AUC
+
+```{fortran}
+#| eval: false
+#| echo: true
+
+C   TIME    AMT   DV    EVID    MDV
+.   0       1     0     1       1
+.   6       1     0     1       1
+.   12      1     0     1       1
+.   18      1     0     1       1
+.   24      1     0     1       1
+.   36      1     0     1       1
+.   48      1     0     1       1
+
+$PROBLEM 
+$INPUT
+$DATA
+$SUBROUTINES
+$MODEL COMP=3
+
+$PK
+KA = 1.73
+KE = 0.0089
+VD = 26.9
+
+; The F1 scale changes according to the dosing scenario
+F1 = THETA(1)
+IF (TIME >= 12.0) F1=THETA(2)
+
+$DES
+DADT(1) = -KA*A(1)
+DADT(2) = KA*A(1) - KE*A(2)
+CC = A(2)/VD
+
+; state equation to compute the AUC
+DADT(3) = CC
+
+$ERROR
+; compute OFV as squared difference to target AUC
+Y = 0.5 * (A(3)-985) * (A(3)-985)
+
+$THETA
+300 FIX
+(0, 1)
+
+$ESTIMATION -2LL NSIG=5 PRINT=10
+```
+
+**Take-home:** With any given PK/PD model we can compute the optimal dose to achieve a specific state of the system by specifying a reference function (e.g., biomarker level, target AUC, etc) and finding the dose (or input) that minimizes the difference between the system's state and the user-specified reference function. Technically, the key idea here is to specify a reference function and request NONMEM optimize the dose that minimizes the difference between the system's state and this reference function by finding the appropriate 'scale' of the bioavailability parameter. The clinical utility of this cannot be overemphasized.
+
+# 
+
+### References
+
+### Recommended Reading/Resources

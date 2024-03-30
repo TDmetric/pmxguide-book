@@ -1,0 +1,257 @@
+---
+title: "Physiologically Based Pharmacokinetic Models"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    echo: false
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Physiologically-Based Pharmacokinetic Models
+
+```{r}
+library(tidyverse)
+library(Hmisc)
+library(rms)
+```
+
+### Overview
+
+```{r}
+model <- '
+$PROB 
+Model: Skin mPBPK Model
+Creator: Tyler Dunlap, Carter Cao
+Species: human (71 kg)
+
+$PARAM @annotated
+species         : 4               : For sorting purposes
+// {Physiological Parameters}
+Vp              : 3.126           : Volume of plasma (L) // species parameter
+Visf            : 15.6            : Volume interstitial fluid (L) // species parameter
+Vsk             : 1.125           : Volume of interstitial fluid in skin (L) // species parameter
+Vlymph          : 5.2             : Volume of lymph (L) // species paramter
+L               : 2.9             : Total lymph flow (L/day) // species parameter
+Lsk             : 11.6*0.002*24   : Lymph flow to skin (500 times lower than plasma flow) (L/day) // species parameter
+Kp              : 0.4             : Fraction of interstitial space available for antibody distribution
+Rf1             : 0.945           : Vascular reflection coefficient for tight tissues, reflect level of resistance to antibody convection
+Rf2             : 0.697           : Vascular reflection coefficient for leaky tissues, reflect level of resistance to antibody convection
+Rfsk            : 0.785           : Vascular reflection coefficient for skin
+Rflymph         : 0.2             : Lymphatic vascular reflection coefficient, reflect level of resistance to antibody convection provided by lymph vessels
+  
+// {Target Parameters}
+kon             : 387.072         : Antibody association rate constant (M−1∙s−1) in plasma
+koff            : 150.5           : Antibody-Target complex dissociation rate constant (s−1) in plasma
+keon            : 387.072         : Antibody-Target association rate constant (M−1∙s−1) in endosomes
+keoff           : 150.5           : Antibody-Target complex dissociation rate constant (s−1) in endosomes
+kint            : 1.155           : Endothelial cell internalization rate constant of mTarget-bound antibody (AmTarget)(day−1)
+kdegm           : 1.155           : 1st order degradation rate constant of membrane bound target (day−1)
+mTarget_b       : 20.03           : membrane bound target baseline
+sTarget_b       : 1.60229         : soluble target baseline
+skTarget_b      : 16              : skin target baseline
+  
+// {Endosome Parameters}
+CLup            : 1.4             : Endothelial nonspecific pinocytosis rate (L∙day−1) (Dong fen paper - 70 kg human) // species parameter
+CLe             : 5.75472         : Lysosome catabolism clearance (L∙day−1)
+krec            : 124.74          : Endosome recycling rate constant (day−1)
+Ve1             : 0.00342           : Endosome volume for receptor-mediated endocytosis (L) // species parameter 
+Ve2             : 0.00342           : Endosome volume for nonspecific pinocytosis (L) // species parameter
+k1on            : 20.8224         : Antibody FcRn association rate constant (M−1∙s−1) in endosomes
+k1off           : 13996.8         : Antibody-FcRn complex (FcRnA) dissociation rate constant (s−1) in endosomes
+  
+// {PK Parameters}
+ka              : 0.693/(72/24)   : absorption rate constant
+BA              : 0.93            : SC Bioavailability
+
+
+$CMT @annotated
+// {Plasma Compartment}
+depot             : depot compartment for SC administration
+A_p               : Antibody in plasma
+sTarget_p         : soluble target in plasma
+AsTarget_p        : Antibody-soluble target in plasma
+mTarget_p         : membrane bound target in plasma
+AmTarget_p        : Antibody-membrane bound target in plasma
+  
+// {Tight Tissue Compartment}
+A_1               : Antibody in tight tissue
+AsTarget_1        : Antibody-soluble Target in tight tissue
+
+// {Leaky Tissue Compartment}
+A_2               : Antibody in leaky tissue
+AsTarget_2        : Antibody-soluble target in leaky tissue
+
+// {Skin Compartment}
+A_sk              : Antibody in skin
+AsTarget_sk       : Antibody-soluble target in skin
+sTarget_sk        : soluble target in skin
+
+// {Lymph Compartment}
+A_lymph           : Antibody in lymph
+AsTarget_lymph    : Antibody-soluble target in lymph
+sTarget_lymph     : soluble target in lymph
+  
+// {Endosome 1 Compartment} 
+A_e1              : Antibody in endosome 1
+mTarget_e1        : membrane bound target in endosome 1
+AmTarget_e1       : Antibody-membrane bound target in endosome 1
+FcRn_e1           : FcRn endosome 1
+FcRnA_e1          : FcRn-Antibody endosome 1
+  
+// {Endosome 2 Compartment} 
+A_e2              : Antibody in endosome 2
+sTarget_e2        : soluble target in endosome 2
+AsTarget_e2       : Antibody-soluble target in endosome 2
+FcRn_e2           : FcRn in endosome 2
+FcRnA_e2          : FcRn-Antibody in endosome 2
+FcRnAsTarget_e2   : FcRn-Antibody-soluble target in endosome 2 - ?
+
+
+$MAIN 
+// Define non-zero ODE initial conditions
+sTarget_p_0=1.60229;
+mTarget_p_0=20.03;                        //20.03
+sTarget_sk_0=16;
+sTarget_lymph_0=0.00176;                  // 0.2*0.002*0.8*16.0/2.904 in RxODE file - Lsk*(1- Rflymph)*skTarget_b/L
+mTarget_e1_0=20.03*1.155*2.6/5.75472;     // mTarget_b*kdegm*Vp/CLe
+FcRn_e1_0=49800;
+FcRn_e2_0=49800;
+sTarget_e2_0=1.60229*1.48001/5.75472;     // sTarget_b*CLup/CLe
+  
+// Derive secondary parameters
+double V1 = Visf*0.65;
+double V2 = Visf*0.35;
+double L1 = L*0.33;
+double L2 = L*0.67;
+double ksynsk = Lsk*(1 - Rflymph)*skTarget_b/Vsk;
+double kdegs = (Lsk*(1- Rflymph)*skTarget_b-sTarget_b*CLup)/(sTarget_b*Vp);
+double ksynm = mTarget_b*kdegm;
+double kem = CLe/Ve1;
+
+
+$ODE 
+
+// { Absorption compartment }
+dxdt_depot = -depot*ka;
+
+// { Plasma }
+
+// Antibody
+dxdt_A_p = ka*depot/Vp-kon*A_p*sTarget_p+koff*AsTarget_p-(1-Rf1)*L1*A_p/Vp-(1-Rf2)*L2*A_p/Vp-(1-Rfsk)*Lsk*A_p/Vp+L*A_lymph/Vp-CLup*A_p/Vp+krec*FcRnA_e2*Ve2/Vp-kon*A_p*mTarget_p+koff*AmTarget_p+krec*Ve1*FcRnA_e1/Vp;
+
+// soluble target
+dxdt_sTarget_p = -kon*A_p*sTarget_p+koff*AsTarget_p+L*sTarget_lymph/Vp-kdegs*sTarget_p-CLup*sTarget_p/Vp;
+
+// Antibody-soluble target
+dxdt_AsTarget_p = kon*A_p*sTarget_p-koff*AsTarget_p-(1-Rf1)*L1*AsTarget_p/Vp-(1-Rf2)*L2*AsTarget_p/Vp+L*AsTarget_lymph/Vp-CLup*AsTarget_p/Vp+krec*FcRnAsTarget_e2*Ve2/Vp;
+
+// membrane-bound target
+dxdt_mTarget_p = -kon*A_p*mTarget_p+koff*AmTarget_p+ksynm-kdegm*mTarget_p;
+
+// Antibody-membrane-bound target
+dxdt_AmTarget_p = kon*A_p*mTarget_p-koff*AmTarget_p-kint*AmTarget_p;
+
+
+// { Tight tissue }
+
+// Antibody in tight tissue
+dxdt_A_1 = (1-Rf1)*L1*A_p/(V1*Kp)-(1-Rflymph)*L1*A_1/(V1*Kp);
+
+// Antibody-soluble target in tight tissue
+dxdt_AsTarget_1 = (1-Rf1)*L1*AsTarget_p/(V1*Kp)-(1-Rflymph)*L1*AsTarget_1/(V1*Kp);
+
+
+// { Leaky tissue }
+
+// Antibody in leaky tissue
+dxdt_A_2 = (1-Rf2)*L2*A_p/(V2*Kp)-(1-Rflymph)*L2*A_2/(V2*Kp);
+
+// Antibody-soluble target in leaky tissue
+dxdt_AsTarget_2 = (1-Rf2)*L2*AsTarget_p/(V2*Kp)-(1-Rflymph)*L2*AsTarget_2/(V2*Kp);
+
+
+// { Lesional skin }
+
+// free Antibody in skin
+dxdt_A_sk = (1-Rfsk)*Lsk*A_p/(Vsk*Kp)-(1-Rflymph)*Lsk*A_sk/(Vsk*Kp) -kon*A_sk*sTarget_sk+koff*AsTarget_sk;
+
+// Antibody-soluble target in skin
+dxdt_AsTarget_sk = kon*A_sk*sTarget_sk-koff*AsTarget_sk-(1-Rflymph)*Lsk*AsTarget_sk/Vsk;
+
+// free soluble-target
+dxdt_sTarget_sk = ksynsk-kon*A_sk*sTarget_sk+koff*AsTarget_sk-(1-Rflymph)*Lsk*sTarget_sk/Vsk;
+
+
+// { Lymph }
+
+// free antibody in lymph
+dxdt_A_lymph = (1-Rflymph)*L1*A_1/Vlymph+(1-Rflymph)*L2*A_2/Vlymph+(1-Rflymph)*Lsk*A_sk/Vlymph -L*A_lymph/Vlymph;
+
+// Antibody-soluble target
+dxdt_AsTarget_lymph = (1-Rflymph)*L1*AsTarget_1/Vlymph+(1-Rflymph)*L2*AsTarget_2/Vlymph+(1-Rflymph)*Lsk*AsTarget_sk/Vlymph-L*AsTarget_lymph/Vlymph;
+
+// free soluble target in lymph
+dxdt_sTarget_lymph = (1-Rflymph)*Lsk*sTarget_sk/Vlymph - L*sTarget_lymph/Vlymph;
+
+
+// { Endosome compartment 1 }
+
+// Antibody in endosome 1
+dxdt_A_e1 = -keon*A_e1*mTarget_e1+keoff*AmTarget_e1-k1on*A_e1*FcRn_e1+k1off*FcRnA_e1-CLe*A_e1/Ve1;
+
+// membrane bound target in endosome 1
+dxdt_mTarget_e1 = -keon*A_e1*mTarget_e1+keoff*AmTarget_e1+kdegm*mTarget_p*Vp/Ve1-kem*mTarget_e1;
+
+// Antibody-membrane-bound target in endosome 1
+dxdt_AmTarget_e1 = keon*A_e1*mTarget_e1-keoff*AmTarget_e1+kint*AmTarget_p*Vp/Ve1-kem*AmTarget_e1;
+
+// FcRn in endosome 1
+dxdt_FcRn_e1 = -k1on*FcRn_e1*A_e1+k1off*FcRnA_e1+krec*FcRnA_e1;
+
+// FcRn-Antibody in endosome 1
+dxdt_FcRnA_e1 = k1on*FcRn_e1*A_e1-k1off*FcRnA_e1-krec*FcRnA_e1;
+
+
+// { Endosome compartment 2 }
+
+// Antibody in endosome 2
+dxdt_A_e2 = -k1on*A_e2*FcRn_e2+k1off*FcRnA_e2-keon*A_e2*sTarget_e2+keoff*AsTarget_e2-CLe*A_e2/Ve2+CLup*A_p/Ve2;
+
+// soluble target in endosome 2
+dxdt_sTarget_e2 = -keon*FcRnA_e2*sTarget_e2+keoff*FcRnAsTarget_e2-keon*A_e2*sTarget_e2+keoff*AsTarget_e2-CLe*sTarget_e2/Ve2+CLup*sTarget_p/Ve2;
+
+// Antibody-soluble target in endosome 2
+dxdt_AsTarget_e2 = -k1on*AsTarget_e2*FcRn_e2+k1off*FcRnAsTarget_e2+keon*A_e2*sTarget_e2-keoff*AsTarget_e2-CLe*AsTarget_e2/Ve2+CLup*AsTarget_p/Ve2;
+
+// FcRn in endosome 2
+dxdt_FcRn_e2 = -k1on*A_e2*FcRn_e2+k1off*FcRnA_e2-k1on*AsTarget_e2*FcRn_e2+k1off*FcRnAsTarget_e2+krec*(FcRnA_e2+FcRnAsTarget_e2);
+
+// FcRn-Antibody in endosome 2
+dxdt_FcRnA_e2 = k1on*A_e2*FcRn_e2-k1off*FcRnA_e2-keon*FcRnA_e2*sTarget_e2+keoff*FcRnAsTarget_e2-krec*FcRnA_e2;
+
+// FcRn-Antibody-soluble target in endosome 2
+dxdt_FcRnAsTarget_e2 = k1on*AsTarget_e2*FcRn_e2-k1off*FcRnAsTarget_e2+keon*FcRnA_e2*sTarget_e2-keoff*FcRnAsTarget_e2-krec*FcRnAsTarget_e2;
+
+
+$TABLE
+// Define variables of interest (post simulation calculated)
+double AB_Plasma = (A_p + AsTarget_p)/Vp;
+double Tar_Plasma = (sTarget_p + AsTarget_p + mTarget_p + AmTarget_p)/Vp;
+
+
+$CAPTURE AB_Plasma Tar_Plasma species Vsk Kp
+'
+```
+
+### References
+
+### Recommended Reading/Resources

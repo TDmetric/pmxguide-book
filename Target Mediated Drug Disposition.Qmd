@@ -1,0 +1,120 @@
+---
+title: "Target Mediated Drug Disposition"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Target Mediated Drug Disposition
+
+```{r}
+library(tidyverse)
+library(mrgsolve)
+```
+
+## Overview
+
+Target-mediated drug disposition (TMDD) is the phenomenon in which a drug binds with high affinity to its pharmacological target site (such as a receptor) to such an extent that this affects its pharmacokinetic characteristics. Although originally proposed to describe the effects of extensive ligand-target binding in tissues for small and large molecules, TMDD has featured most prominently in the literature as a saturable clearance mechanism for biologics, in particular peptides, proteins, and monoclonal antibodies (mAbs).
+
+### Lamgmuir adsorption isotherm
+
+The starting point for a basic TMDD model is the binding of a drug (represented by *L*) to a target (*R*) to produce a complex (*P*) in a reversible reaction. This second-order binding and first-order dissociation is represented by the rate constants $k_{on}$ and $k_{off}$
+
+### Quasi-Equilibrium Model
+
+The QE model assumes that equilibrium between the binding and dissociation of the complex has been achieved, . This equilibrium assumption is plausible because these two rates are often of several magnitudes faster than the other processes. The model simplifies the full TMDD model by introducing the equilibrium constant the total concentration of drug in the central compartment and the total concentration of receptor into the model.
+
+```{r}
+
+```
+
+### Quasi-Steady State Model
+
+The QSS model assumes that the binding rate is balanced by the sum of the dissociation and internalization rates . The only difference between this model and the QE model is that now the equilibrium constant is . This model produces a more accurate result than the QE model when . Unlike the QE model, the QSS model accurately predicts the phase when the amount of receptor is approximately zero. For a potent drug this phase may represent the majority of the experiment, since in theory the aim of the drug is to bind to the receptor and keep it bound for as long as possible. Thus, the QSS model may fit the majority of data points in this case and give a good approximation.
+
+```{r}
+
+```
+
+### Michaelis-Menten Model
+
+The MM model is derived from the Michaelis--Menten equation for enzyme kinetics, which relates reaction rate to concentration. For the MM model to hold either a QE or QSS assumption is necessary, so the MM model is a special case of the QE and QSS models.
+
+```{r}
+
+```
+
+Due to this high affinity, the binding to the target and subsequent turnover of the drug--target complex can contribute significantly to the disposition of biologics. However, this elimination by binding to a target is saturable because of the finite number of targets on the cell surface. This saturability causes the nonlinearity seen in TMDD models.
+
+$$
+\frac{dL}{dt} = k_{off}*LR - k_{on}*L*R - k_{el}*L
+$$
+
+$$
+\frac{dR}{dt} = k_{in} + k_{off}*LR - k_{on}*L*R - k_{out}*R
+$$
+
+$$
+\frac{dLR}{dt} = k_{on}*L*R - k_{off}*LR
+$$
+
+Note that the formation rate of the Ligand-Receptor complex (LR) is dependent on both the concentration of free ligand and free receptor. This dependence makes this a second order reaction.
+
+A one compartment TMDD model
+
+```{r}
+one_cmt_tmdd <- '
+$PARAM @annotated
+TVCL   :  2  : Clearance (volume/time)
+TVV    : 10  : Central volume (volume)
+kon    : 0.3  : second order formation rate
+koff   : 0.6  : first order dissociation rate
+kin    : 15  : production
+kout   : 3  : elimination
+
+
+$CMT  @annotated
+L  : Ligand (mass)
+R  : Receptor (mass)
+LR : Ligand-receptor complex (mass)
+
+$GLOBAL
+#define Lc (L/TVV)
+#define Rc (R/TVV)
+#define LRc (LR/TVV)
+#define kel (TVCL/TVV)
+
+$MAIN
+R_0 = kin/kout;
+
+$ODE
+dxdt_L = koff*LR - kon*L*R - kel*L;
+dxdt_R = kin + koff*LR - kon*L*R - kout*R;
+dxdt_LR = kon*L*R - koff*LR;
+'
+
+one_cmt_tmdd <- mcode('one_cmt_tmdd', one_cmt_tmdd)
+```
+
+```{r}
+one_cmt_tmdd %>%
+  ev(ID=1, amt=5000, cmt=1, evid=1) %>%
+  mrgsim(end=50, delta=1) %>%
+  plot(L~time, logy=TRUE)
+  
+plot(L+R+LR~time)
+```
+
+### FcRn Recycling
+
+### References

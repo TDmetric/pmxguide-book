@@ -1,0 +1,74 @@
+---
+title: "Decision Theory Basics"
+author: "Tyler Dunlap, PharmD"
+execute:
+  eval: false
+format:
+  html:
+    title-block-banner: true
+    echo: false
+    self-contained: true
+    toc: true
+    toc-location: left
+    css: styles.css
+    theme: journal
+    page-layout: article
+editor: visual
+---
+
+# Decision Theory Basics
+
+```{r}
+library(tidyverse)
+library(Hmisc)
+library(rms)
+```
+
+### Overview
+
+Decision theory is a multidisciplinary framework that provides a structured approach to making rational choices among different courses of action in the presence of uncertainty. It draws from various fields, including mathematics, economics, psychology, and philosophy, to analyze how individuals and organizations make decisions and evaluate their outcomes.
+
+### Key Concepts
+
+| Col1                  | Col2                                                                                                                                                            |
+|-------------------|-----------------------------------------------------|
+| Decision-Maker        | The individual or entity faced with a decision, often referred to as the decision-maker.                                                                        |
+| Alternatives          | The available choices or courses of action that the decision-maker can select from.                                                                             |
+| States of Nature      | Different possible outcomes or events that may occur, which are often uncertain.                                                                                |
+| Payoffs or Utilities: | Quantitative values that represent the desirability or preference of outcomes. Payoffs can be objective (e.g., monetary gains) or subjective (e.g., happiness). |
+| Expected Value        | The weighted average value of possible outcomes, considering their associated probabilities.                                                                    |
+| Expected Utility      | Similar to expected value, but taking into account individual preferences or utility functions                                                                  |
+| Decision Trees        | Visual representations of decision problems that show the sequence of choices and possible outcomes.                                                            |
+| Risk Aversion         | The tendency of individuals to prefer avoiding risk, even if the expected value is higher for a riskier option.                                                 |
+
+### Types of Decisions
+
+| Decision                      | Description                                                                                                |
+|-------------------|-----------------------------------------------------|
+| Deterministic Decision-Making | When all factors, alternatives, and outcomes are known with certainty, allowing for clear decision-making. |
+| Under Uncertainty             | When the outcomes are unknown and unpredictable, decision-makers may use                                   |
+
+```         
+                             various criteria such as maximum likelihood, maximin (minimax), and                                                               
+                             maximax strategies.                                                                                                               |
+```
+
+| Under Risk \| When the decision-maker has partial information about the probabilities of different outcomes, leading to more sophisticated strategies such as expected utility maximization. \|
+| Utility Theory \| This theory examines how individuals assign utilities to different outcomes, reflecting their subjective preferences and values. \|
+
+### Decision Making Models
+
+| Model                   | Description                                                                                   |
+|-------------------|-----------------------------------------------------|
+| Maximin and Minimax     | Strategies that focus on worst-case scenarios, aiming to minimize potential losses.           |
+| Maximax                 | Maximizing potential gains by selecting alternatives that offer the highest possible outcome. |
+| Expected Utility Theory |                                                                                               |
+|                         |                                                                                               |
+
+### Summary
+
+Decision theory provides a structured framework for rational decision-making in uncertain and complex environments. It enables individuals and organizations to evaluate the potential outcomes of different choices, consider their preferences, and make informed decisions that align with their goals and values. Its principles and models continue to be essential in various fields to guide optimal decision-making processes.
+
+### References
+
+### Recommended Reading/Resources
